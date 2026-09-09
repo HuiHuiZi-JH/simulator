@@ -1,0 +1,10 @@
+{
+  "log_level": "INFO",
+  "log_dir": "log",
+  "log_file": "simulation.log",
+  "max_size": 10,
+  "max_backups": 5,
+  "message_log_file": "message.log",
+  "message_log_level": "DEBUG",
+  "traffic_log_file": "modbus_traffic.log"
+}

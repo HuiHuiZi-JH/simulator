@@ -1,0 +1,68 @@
+{
+  "start_time": "14:19",
+  "Devices": [
+    {
+      "Meter": [
+        {
+          "DeviceKey": "Meter_01",
+          "slave_id": 1
+        }
+      ]
+    },
+    {
+      "PV": [
+        {
+          "DeviceKey": "PV_01",
+          "ratedPower": 100,
+          "mode": 0,
+	  "csv_file": "pv_curve.csv",
+          "slave_id": 2
+        }
+      ]
+    },
+    {
+      "EV": [
+        {
+          "DeviceKey": "EV_01",
+          "PUB_CONN.RatedPW": 50,
+          "PUB_CONN.MinChargePW": 0,
+          "charge_factor": 1.0,
+          "charge_schedule": [
+            {"start": "03:30", "stop": "04:30"},
+            {"start": "05:30", "stop": "06:00"},
+            {"start": "12:00", "stop": "13:00"},
+            {"start": "18:00", "stop": "18:30"}
+          ],
+          "slave_id": 4
+        }
+      ]
+    },
+    {
+      "BESS": [
+        {
+          "DeviceKey": "BESS_01",
+          "ratedCapacity": 12000,
+          "maxChargePower": 9900,
+          "maxDischargePower": 9900,
+          "socMax": 100,
+          "socMin": 0,
+          "initial_soc": 0.5,
+          "voltage_nominal": 48,
+          "resistance": 0.01,
+          "slave_id": 5
+        }
+      ]
+    },
+    {
+      "Load": [
+        {
+          "DeviceKey": "LOAD_001",
+          "base_power": 50,
+          "mode": 0,
+          "csv_file": "load_curve.csv",
+          "slave_id": 8
+        }
+      ]
+    }
+  ]
+}
