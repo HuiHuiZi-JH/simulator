@@ -1,0 +1,958 @@
+<title>MicroGrid Simulator</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@500;600;700&family=IBM+Plex+Mono:wght@400;500;600&family=Source+Serif+4:opsz,wght@8..60,400;8..60,600&display=swap">
+
+<style>
+  :root {
+    --ground:   #EDF0F2;
+    --surface:  #FFFFFF;
+    --sunken:   #E3E8EB;
+    --ink:      #131C24;
+    --muted:    #566673;
+    --faint:    #7C8A95;
+    --line:     #D2DADF;
+    --hairline: #E1E7EA;
+    --accent:   #0E6E7D;
+    --accent-soft: #D8ECEF;
+    --gen:      #2C7F60;
+    --gen-soft: #DCEDE5;
+    --con:      #B04E2A;
+    --con-soft: #F5E3DA;
+    --shadow:   0 1px 2px rgba(19, 28, 36, .06), 0 8px 24px -12px rgba(19, 28, 36, .18);
+
+    --measure: 66ch;
+    --step-0: .9375rem;
+    --step-1: 1.0625rem;
+    --step-2: 1.375rem;
+    --step-3: 1.875rem;
+    --step-4: 2.5rem;
+    --step-5: clamp(2.75rem, 6vw, 4.25rem);
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --ground:   #0F151A;
+      --surface:  #161F26;
+      --sunken:   #121A20;
+      --ink:      #E2EAEF;
+      --muted:    #93A5B1;
+      --faint:    #758794;
+      --line:     #2A363F;
+      --hairline: #222D35;
+      --accent:   #46B4C6;
+      --accent-soft: #16323A;
+      --gen:      #56BE92;
+      --gen-soft: #14312657;
+      --con:      #E28A63;
+      --con-soft: #33201657;
+      --shadow:   0 1px 2px rgba(0, 0, 0, .4), 0 8px 24px -12px rgba(0, 0, 0, .7);
+    }
+  }
+
+  :root[data-theme="dark"] {
+    --ground:   #0F151A;
+    --surface:  #161F26;
+    --sunken:   #121A20;
+    --ink:      #E2EAEF;
+    --muted:    #93A5B1;
+    --faint:    #758794;
+    --line:     #2A363F;
+    --hairline: #222D35;
+    --accent:   #46B4C6;
+    --accent-soft: #16323A;
+    --gen:      #56BE92;
+    --gen-soft: #14312657;
+    --con:      #E28A63;
+    --con-soft: #33201657;
+    --shadow:   0 1px 2px rgba(0, 0, 0, .4), 0 8px 24px -12px rgba(0, 0, 0, .7);
+  }
+
+  * { box-sizing: border-box; }
+
+  body {
+    background: var(--ground);
+    color: var(--ink);
+    font-family: "Source Serif 4", Georgia, "Times New Roman", serif;
+    font-size: var(--step-1);
+    line-height: 1.62;
+    margin: 0;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  h1, h2, h3, .sans {
+    font-family: Archivo, "Helvetica Neue", Arial, sans-serif;
+    text-wrap: balance;
+  }
+
+  code, kbd, .mono {
+    font-family: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace;
+    font-variant-ligatures: none;
+  }
+
+  a { color: var(--accent); text-underline-offset: .18em; }
+  a:focus-visible, summary:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 3px;
+    border-radius: 2px;
+  }
+
+  /* ---------- shell ---------- */
+
+  .wrap {
+    max-width: 78rem;
+    margin: 0 auto;
+    padding: 0 clamp(1.15rem, 4vw, 3rem);
+  }
+
+  .col {
+    max-width: var(--measure);
+  }
+
+  main > section {
+    padding-block: clamp(3rem, 7vw, 5.25rem);
+    border-top: 1px solid var(--hairline);
+  }
+
+  .eyebrow {
+    font-family: Archivo, Arial, sans-serif;
+    font-size: .70rem;
+    font-weight: 600;
+    letter-spacing: .16em;
+    text-transform: uppercase;
+    color: var(--faint);
+    margin: 0 0 1.1rem;
+  }
+
+  h2 {
+    font-size: var(--step-3);
+    font-weight: 700;
+    letter-spacing: -.021em;
+    line-height: 1.16;
+    margin: 0 0 .85rem;
+  }
+
+  h3 {
+    font-size: var(--step-1);
+    font-weight: 600;
+    letter-spacing: -.005em;
+    margin: 0 0 .4rem;
+  }
+
+  p { margin: 0 0 1.05rem; }
+  section p:last-child { margin-bottom: 0; }
+
+  .lede {
+    font-size: var(--step-2);
+    line-height: 1.5;
+    color: var(--muted);
+  }
+
+  /* ---------- masthead ---------- */
+
+  header.masthead {
+    padding-block: clamp(3.5rem, 9vw, 6.5rem) clamp(2.5rem, 5vw, 4rem);
+  }
+
+  .plate {
+    display: inline-flex;
+    align-items: center;
+    gap: .6rem;
+    font-family: "IBM Plex Mono", monospace;
+    font-size: .72rem;
+    font-weight: 500;
+    letter-spacing: .1em;
+    text-transform: uppercase;
+    color: var(--accent);
+    background: var(--accent-soft);
+    border: 1px solid color-mix(in srgb, var(--accent) 26%, transparent);
+    border-radius: 999px;
+    padding: .34rem .8rem;
+    margin-bottom: 1.6rem;
+  }
+
+  .plate::before {
+    content: "";
+    width: .42rem; height: .42rem;
+    border-radius: 50%;
+    background: var(--accent);
+  }
+
+  h1 {
+    font-size: var(--step-5);
+    font-weight: 700;
+    letter-spacing: -.033em;
+    line-height: .98;
+    margin: 0 0 1.1rem;
+  }
+
+  h1 .thin { font-weight: 500; color: var(--muted); display: block; }
+
+  .masthead .lede { max-width: 54ch; }
+
+  .facts {
+    display: flex;
+    flex-wrap: wrap;
+    gap: .5rem;
+    margin-top: 2.1rem;
+    padding: 0; list-style: none;
+  }
+
+  .facts li {
+    font-family: "IBM Plex Mono", monospace;
+    font-size: .76rem;
+    letter-spacing: .01em;
+    color: var(--muted);
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: 5px;
+    padding: .42rem .7rem;
+  }
+
+  .facts b { color: var(--ink); font-weight: 600; }
+
+  /* ---------- diagram ---------- */
+
+  .diagram-frame {
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    box-shadow: var(--shadow);
+    padding: clamp(1rem, 3vw, 1.9rem);
+    overflow-x: auto;
+  }
+
+  .diagram-frame svg {
+    display: block;
+    min-width: 660px;
+    width: 100%;
+    height: auto;
+  }
+
+  .legend {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 1.25rem;
+    margin-top: 1.4rem;
+    padding: 0; list-style: none;
+    font-family: Archivo, Arial, sans-serif;
+    font-size: .8rem;
+    color: var(--muted);
+  }
+
+  .legend li { display: flex; align-items: center; gap: .48rem; }
+
+  .swatch {
+    width: 1.5rem; height: 0;
+    border-top-width: 2.5px;
+    border-top-style: solid;
+    flex: none;
+  }
+  .swatch.gen  { border-color: var(--gen); }
+  .swatch.con  { border-color: var(--con); }
+  .swatch.ctl  { border-color: var(--accent); border-top-style: dashed; }
+
+  /* ---------- device cards ---------- */
+
+  .devices {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(15.5rem, 1fr));
+    gap: 1px;
+    margin-top: 2.6rem;
+    background: var(--line);
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    overflow: hidden;
+  }
+
+  .device {
+    background: var(--surface);
+    padding: 1.4rem 1.35rem 1.5rem;
+    display: flex;
+    flex-direction: column;
+    gap: .55rem;
+  }
+
+  .device-top {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: .75rem;
+  }
+
+  .role {
+    font-family: "IBM Plex Mono", monospace;
+    font-size: .66rem;
+    font-weight: 500;
+    letter-spacing: .09em;
+    text-transform: uppercase;
+    padding: .18rem .48rem;
+    border-radius: 3px;
+    white-space: nowrap;
+  }
+  .role.gen  { color: var(--gen); background: var(--gen-soft); }
+  .role.con  { color: var(--con); background: var(--con-soft); }
+  .role.both { color: var(--accent); background: var(--accent-soft); }
+
+  .device p {
+    margin: 0;
+    font-size: var(--step-0);
+    color: var(--muted);
+    line-height: 1.55;
+  }
+
+  .device dl {
+    margin: .4rem 0 0;
+    display: grid;
+    grid-template-columns: auto 1fr;
+    gap: .3rem .8rem;
+    font-family: "IBM Plex Mono", monospace;
+    font-size: .73rem;
+    border-top: 1px solid var(--hairline);
+    padding-top: .75rem;
+  }
+  .device dt { color: var(--faint); }
+  .device dd { margin: 0; color: var(--ink); font-variant-numeric: tabular-nums; }
+
+  /* ---------- prose bits ---------- */
+
+  .note {
+    border-left: 2px solid var(--accent);
+    padding: .1rem 0 .1rem 1.05rem;
+    color: var(--muted);
+    font-size: var(--step-0);
+  }
+  .note b { color: var(--ink); font-weight: 600; }
+
+  ul.plain {
+    margin: 0 0 1.05rem;
+    padding-left: 1.15rem;
+  }
+  ul.plain li { margin-bottom: .5rem; }
+
+  code {
+    font-size: .86em;
+    background: var(--sunken);
+    border-radius: 3px;
+    padding: .1em .34em;
+  }
+
+  pre {
+    background: var(--sunken);
+    border: 1px solid var(--hairline);
+    border-radius: 8px;
+    padding: 1.05rem 1.15rem;
+    overflow-x: auto;
+    margin: 0 0 1.05rem;
+  }
+  pre code {
+    background: none;
+    padding: 0;
+    font-size: .8125rem;
+    line-height: 1.62;
+    color: var(--ink);
+  }
+  .cmt { color: var(--faint); }
+  .str { color: var(--gen); }
+  .key { color: var(--accent); }
+
+  /* ---------- tables ---------- */
+
+  .maps {
+    display: grid;
+    gap: 1.6rem;
+    margin-top: 2.4rem;
+    grid-template-columns: repeat(auto-fit, minmax(19rem, 1fr));
+  }
+
+  .map {
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: 9px;
+    overflow: hidden;
+  }
+
+  .map-head {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: .6rem;
+    padding: .8rem 1rem;
+    border-bottom: 1px solid var(--hairline);
+    background: var(--sunken);
+  }
+
+  .map-head h3 { margin: 0; font-size: .95rem; }
+
+  .slave {
+    font-family: "IBM Plex Mono", monospace;
+    font-size: .72rem;
+    color: var(--faint);
+  }
+
+  .table-scroll { overflow-x: auto; }
+
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    font-family: "IBM Plex Mono", monospace;
+    font-size: .755rem;
+  }
+
+  th {
+    text-align: left;
+    font-weight: 500;
+    font-size: .655rem;
+    letter-spacing: .09em;
+    text-transform: uppercase;
+    color: var(--faint);
+    padding: .55rem 1rem;
+    border-bottom: 1px solid var(--hairline);
+    white-space: nowrap;
+  }
+
+  td {
+    padding: .42rem 1rem;
+    border-bottom: 1px solid var(--hairline);
+    color: var(--muted);
+    vertical-align: baseline;
+  }
+
+  tr:last-child td { border-bottom: none; }
+
+  td.addr {
+    color: var(--ink);
+    font-variant-numeric: tabular-nums;
+    width: 1%;
+    white-space: nowrap;
+  }
+
+  td.pt { color: var(--ink); white-space: nowrap; }
+
+  .rw {
+    display: inline-block;
+    font-size: .62rem;
+    font-weight: 600;
+    letter-spacing: .08em;
+    color: var(--accent);
+    background: var(--accent-soft);
+    border-radius: 3px;
+    padding: .06rem .34rem;
+    margin-left: .4rem;
+    vertical-align: .08em;
+  }
+
+  /* ---------- two-up ---------- */
+
+  .split {
+    display: grid;
+    gap: clamp(1.6rem, 4vw, 3rem);
+    grid-template-columns: repeat(auto-fit, minmax(17rem, 1fr));
+    margin-top: 2.2rem;
+  }
+
+  .split h3 { margin-bottom: .5rem; }
+  .split p { font-size: var(--step-0); color: var(--muted); }
+
+  /* ---------- footer ---------- */
+
+  footer {
+    border-top: 1px solid var(--hairline);
+    padding-block: 2.6rem 3.5rem;
+    font-size: .82rem;
+    color: var(--faint);
+    font-family: Archivo, Arial, sans-serif;
+  }
+
+  @media (prefers-reduced-motion: no-preference) {
+    a { transition: opacity .15s ease; }
+    a:hover { opacity: .72; }
+  }
+</style>
+
+<header class="masthead">
+  <div class="wrap">
+    <span class="plate">Modbus TCP · Port 5021</span>
+    <h1>MicroGrid<br>Simulator<span class="thin">without the hardware</span></h1>
+    <p class="lede col">
+      A pure-Python Modbus TCP slave that impersonates a whole microgrid — solar inverter,
+      battery, EV charger, building load, and revenue meter — so an energy management system
+      can be exercised against realistic, controllable devices instead of a lab bench.
+    </p>
+    <ul class="facts">
+      <li><b>5</b> device models</li>
+      <li><b>0</b> third-party dependencies</li>
+      <li><b>1 Hz</b> physics tick</li>
+      <li>32-bit signed · <b>&times;100</b> scaling</li>
+      <li>FC <b>3</b> read · FC <b>16</b> write</li>
+    </ul>
+  </div>
+</header>
+
+<main>
+
+  <section id="architecture">
+    <div class="wrap">
+      <p class="eyebrow">Architecture</p>
+      <h2 class="col">Two threads, one shared state table</h2>
+      <p class="col">
+        <code>main.py</code> starts a simulation thread and a server thread over a single
+        <code>devices_data</code> dictionary, guarded by one lock. The simulation thread advances
+        every device model once a second and writes the results into each device's register table.
+        The server thread answers Modbus requests out of that same table — so a client always reads
+        a coherent snapshot, and anything it writes becomes an input to the next tick.
+      </p>
+
+      <div class="diagram-frame" style="margin-top: 2.4rem;">
+        <svg viewBox="0 0 900 400" role="img" aria-labelledby="diagram-title">
+          <title id="diagram-title">Power flows from PV, battery, EV charger and load onto a shared bus measured by the meter; a Modbus TCP client reads and writes setpoints over port 5021.</title>
+
+          <defs>
+            <marker id="ar-gen" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+              <path d="M0,0 L10,5 L0,10 z" fill="var(--gen)"></path>
+            </marker>
+            <marker id="ar-con" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+              <path d="M0,0 L10,5 L0,10 z" fill="var(--con)"></path>
+            </marker>
+            <marker id="ar-ctl" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="5.5" markerHeight="5.5" orient="auto-start-reverse">
+              <path d="M0,0 L10,5 L0,10 z" fill="var(--accent)"></path>
+            </marker>
+          </defs>
+
+          <g font-family="Archivo, Arial, sans-serif">
+
+            <!-- sources row -->
+            <g>
+              <rect x="90"  y="36" width="132" height="52" rx="6" fill="var(--surface)" stroke="var(--gen)" stroke-width="1.5"></rect>
+              <text x="156" y="59" text-anchor="middle" font-size="14" font-weight="600" fill="var(--ink)">PV Inverter</text>
+              <text x="156" y="76" text-anchor="middle" font-size="11" font-family="IBM Plex Mono, monospace" fill="var(--faint)">slave 2</text>
+
+              <rect x="262" y="36" width="132" height="52" rx="6" fill="var(--surface)" stroke="var(--accent)" stroke-width="1.5"></rect>
+              <text x="328" y="59" text-anchor="middle" font-size="14" font-weight="600" fill="var(--ink)">Battery</text>
+              <text x="328" y="76" text-anchor="middle" font-size="11" font-family="IBM Plex Mono, monospace" fill="var(--faint)">slave 5</text>
+            </g>
+
+            <!-- bus -->
+            <line x1="60" y1="185" x2="620" y2="185" stroke="var(--ink)" stroke-width="3" stroke-linecap="round"></line>
+            <text x="60" y="172" font-size="11" font-family="IBM Plex Mono, monospace" letter-spacing="1.2" fill="var(--faint)">AC BUS</text>
+
+            <!-- source drops -->
+            <path d="M156 88 L156 183" stroke="var(--gen)" stroke-width="2" fill="none" marker-end="url(#ar-gen)"></path>
+            <path d="M328 88 L328 183" stroke="var(--accent)" stroke-width="2" fill="none" stroke-dasharray="0" marker-end="url(#ar-ctl)"></path>
+
+            <!-- sinks row -->
+            <g>
+              <rect x="90"  y="282" width="132" height="52" rx="6" fill="var(--surface)" stroke="var(--con)" stroke-width="1.5"></rect>
+              <text x="156" y="305" text-anchor="middle" font-size="14" font-weight="600" fill="var(--ink)">EV Charger</text>
+              <text x="156" y="322" text-anchor="middle" font-size="11" font-family="IBM Plex Mono, monospace" fill="var(--faint)">slave 4</text>
+
+              <rect x="262" y="282" width="132" height="52" rx="6" fill="var(--surface)" stroke="var(--con)" stroke-width="1.5"></rect>
+              <text x="328" y="305" text-anchor="middle" font-size="14" font-weight="600" fill="var(--ink)">Building Load</text>
+              <text x="328" y="322" text-anchor="middle" font-size="11" font-family="IBM Plex Mono, monospace" fill="var(--faint)">slave 8</text>
+            </g>
+
+            <!-- sink drops -->
+            <path d="M156 282 L156 187" stroke="var(--con)" stroke-width="2" fill="none" marker-start="url(#ar-con)"></path>
+            <path d="M328 282 L328 187" stroke="var(--con)" stroke-width="2" fill="none" marker-start="url(#ar-con)"></path>
+
+            <!-- meter + grid -->
+            <rect x="470" y="152" width="126" height="66" rx="6" fill="var(--surface)" stroke="var(--ink)" stroke-width="1.5"></rect>
+            <text x="533" y="180" text-anchor="middle" font-size="14" font-weight="600" fill="var(--ink)">Meter</text>
+            <text x="533" y="199" text-anchor="middle" font-size="11" font-family="IBM Plex Mono, monospace" fill="var(--faint)">slave 1</text>
+
+            <path d="M600 185 L716 185" stroke="var(--con)" stroke-width="2" fill="none" marker-end="url(#ar-con)"></path>
+            <path d="M600 168 L716 168" stroke="var(--gen)" stroke-width="2" fill="none" marker-end="url(#ar-gen)"></path>
+            <text x="658" y="160" text-anchor="middle" font-size="10.5" font-family="IBM Plex Mono, monospace" fill="var(--gen)">export &minus;</text>
+            <text x="658" y="204" text-anchor="middle" font-size="10.5" font-family="IBM Plex Mono, monospace" fill="var(--con)">import +</text>
+
+            <rect x="720" y="152" width="104" height="66" rx="6" fill="var(--sunken)" stroke="var(--line)" stroke-width="1.5"></rect>
+            <text x="772" y="190" text-anchor="middle" font-size="14" font-weight="600" fill="var(--muted)">Grid</text>
+
+            <!-- modbus layer -->
+            <rect x="628" y="304" width="200" height="58" rx="6" fill="var(--accent-soft)" stroke="var(--accent)" stroke-width="1.5"></rect>
+            <text x="728" y="327" text-anchor="middle" font-size="13.5" font-weight="600" fill="var(--accent)">EMS / Modbus client</text>
+            <text x="728" y="345" text-anchor="middle" font-size="11" font-family="IBM Plex Mono, monospace" fill="var(--accent)">0.0.0.0:5021</text>
+
+            <path d="M628 333 L420 333 L420 240 L156 240 L156 112" stroke="var(--accent)" stroke-width="1.5" fill="none" stroke-dasharray="5 4" opacity=".85" marker-end="url(#ar-ctl)"></path>
+            <path d="M420 333 L420 258 L328 258 L328 112" stroke="var(--accent)" stroke-width="1.5" fill="none" stroke-dasharray="5 4" opacity=".85" marker-end="url(#ar-ctl)"></path>
+            <path d="M533 304 L533 222" stroke="var(--accent)" stroke-width="1.5" fill="none" stroke-dasharray="5 4" opacity=".85" marker-end="url(#ar-ctl)"></path>
+            <text x="440" y="290" font-size="10.5" font-family="IBM Plex Mono, monospace" fill="var(--accent)">setpoints &amp; reads</text>
+          </g>
+        </svg>
+      </div>
+
+      <ul class="legend">
+        <li><span class="swatch gen"></span> Generation — reduces net import</li>
+        <li><span class="swatch con"></span> Consumption — adds net import</li>
+        <li><span class="swatch ctl"></span> Modbus TCP — reads and setpoint writes</li>
+      </ul>
+    </div>
+  </section>
+
+  <section id="devices">
+    <div class="wrap">
+      <p class="eyebrow">Device models</p>
+      <h2 class="col">Five models, each with its own physics</h2>
+      <p class="col">
+        Every model exposes the same contract — a constructor taking its slice of
+        <code>device.json</code>, and an <code>update()</code> returning a dictionary of named
+        points. The simulation loop maps those names onto register offsets and drops them into
+        the shared table.
+      </p>
+
+      <div class="devices">
+
+        <article class="device">
+          <div class="device-top">
+            <h3>PV Inverter</h3>
+            <span class="role gen">Generates</span>
+          </div>
+          <p>
+            Follows a 24-hour irradiance curve, either interpolated from a CSV or synthesised as a
+            sin² arc from 06:00 to 18:00 with ±5% noise. Output is clamped to whatever active-power
+            limit the client has written, which is how curtailment gets tested.
+          </p>
+          <dl>
+            <dt>Curve</dt><dd>CSV or sin² fallback</dd>
+            <dt>Control</dt><dd>LimitPower</dd>
+            <dt>Accrues</dt><dd>kWh produced</dd>
+          </dl>
+        </article>
+
+        <article class="device">
+          <div class="device-top">
+            <h3>Battery</h3>
+            <span class="role both">Both</span>
+          </div>
+          <p>
+            Takes a signed power command — positive charges, negative discharges — clamps it to the
+            configured rates, then integrates it into state of charge. When SOC would cross its
+            ceiling or floor the model back-calculates the energy actually absorbed, so the counters
+            stay physically honest rather than silently truncating.
+          </p>
+          <dl>
+            <dt>Control</dt><dd>SysAPSetPoint</dd>
+            <dt>Bounds</dt><dd>socMin … socMax</dd>
+            <dt>Accrues</dt><dd>charge / discharge kWh</dd>
+          </dl>
+        </article>
+
+        <article class="device">
+          <div class="device-top">
+            <h3>EV Charger</h3>
+            <span class="role con">Consumes</span>
+          </div>
+          <p>
+            Draws its rated power during configured charging windows and nothing outside them.
+            Windows may wrap past midnight. Draw is capped by the written power setpoint and floored
+            at the minimum charge power, then converted into balanced three-phase currents using an
+            AC or DC voltage and power factor.
+          </p>
+          <dl>
+            <dt>Schedule</dt><dd>start / stop windows</dd>
+            <dt>Control</dt><dd>ChargePWSet</dd>
+            <dt>Reports</dt><dd>L1 / L2 / L3 current</dd>
+          </dl>
+        </article>
+
+        <article class="device">
+          <div class="device-top">
+            <h3>Building Load</h3>
+            <span class="role con">Consumes</span>
+          </div>
+          <p>
+            Replays a demand profile interpolated from a CSV at quarter-hour resolution. If the file
+            is missing or the model is configured for it, the load instead jitters randomly between
+            80% and 120% of its base power.
+          </p>
+          <dl>
+            <dt>Curve</dt><dd>CSV or random walk</dd>
+            <dt>Control</dt><dd>none — passive</dd>
+            <dt>Resolution</dt><dd>0.25 h</dd>
+          </dl>
+        </article>
+
+        <article class="device">
+          <div class="device-top">
+            <h3>Meter</h3>
+            <span class="role both">Measures</span>
+          </div>
+          <p>
+            Reads every other device each tick and computes the point of common coupling:
+            consumption minus generation, with the battery counted on whichever side its sign puts
+            it. It integrates that net figure on a monotonic clock into separate import and export
+            registers, so the totals survive a long tick or a system clock change.
+          </p>
+          <dl>
+            <dt>Derives</dt><dd>net active power</dd>
+            <dt>Integrates</dt><dd>import / export kWh</dd>
+            <dt>Clock</dt><dd>time.monotonic()</dd>
+          </dl>
+        </article>
+
+      </div>
+    </div>
+  </section>
+
+  <section id="protocol">
+    <div class="wrap">
+      <p class="eyebrow">Protocol</p>
+      <h2 class="col">A hand-written Modbus TCP server</h2>
+      <p class="col">
+        The server speaks raw sockets — no <code>pymodbus</code>, no dependency tree at all. It
+        frames MBAP headers itself, streams partial packets into a buffer until a full request
+        arrives, and routes each one to a device by unit ID.
+      </p>
+
+      <div class="split">
+        <div>
+          <h3>32-bit values across register pairs</h3>
+          <p>
+            Every point occupies two consecutive registers as a big-endian signed 32-bit integer,
+            scaled by 100. That is why all offsets are even and why request quantities must be even
+            too — an odd count would split a value in half.
+          </p>
+        </div>
+        <div>
+          <h3>Function codes</h3>
+          <p>
+            <b>3</b> reads holding registers; <b>16</b> writes multiple. <b>6</b> is deliberately
+            rejected with exception 1, because a single-register write cannot carry a 32-bit value.
+            Bad addresses return exception 2, malformed frames exception 3.
+          </p>
+        </div>
+        <div>
+          <h3>Unit ID routing</h3>
+          <p>
+            Each device claims a unit ID from 1 to 247. On startup the loader validates them, and
+            anything out of range or duplicated is replaced with the next free ID rather than
+            shadowing another device.
+          </p>
+        </div>
+        <div>
+          <h3>Concurrent clients</h3>
+          <p>
+            Every accepted connection is handled on its own daemon thread. Reads and writes both
+            take the shared lock, so a client polling registers 0–4 cannot observe half of one tick
+            and half of the next.
+          </p>
+        </div>
+      </div>
+
+      <p class="note col" style="margin-top: 2.2rem;">
+        <b>Closing the loop.</b> Three registers are inputs rather than outputs — the PV power
+        limit, the battery setpoint, and the EV charge setpoint. Write one and the next tick reflects
+        it, which is what makes the simulator useful for testing a controller instead of merely
+        replaying data.
+      </p>
+    </div>
+  </section>
+
+  <section id="registers">
+    <div class="wrap">
+      <p class="eyebrow">Register map</p>
+      <h2 class="col">Every point, by offset</h2>
+      <p class="col">
+        Offsets are relative to base address 0 for each unit. Values marked
+        <span class="rw" style="margin-left:0">W</span> are read back by the simulation as control
+        inputs; the rest are outputs.
+      </p>
+
+      <div class="maps">
+
+        <div class="map">
+          <div class="map-head">
+            <h3>Meter</h3>
+            <span class="slave">unit 1</span>
+          </div>
+          <div class="table-scroll">
+            <table>
+              <thead><tr><th>Addr</th><th>Point</th><th>Meaning</th></tr></thead>
+              <tbody>
+                <tr><td class="addr">0</td><td class="pt">ActivePower</td><td>Net at PCC, + import</td></tr>
+                <tr><td class="addr">2</td><td class="pt">APProductionKWH</td><td>Exported energy</td></tr>
+                <tr><td class="addr">4</td><td class="pt">APConsumedKWH</td><td>Imported energy</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <div class="map">
+          <div class="map-head">
+            <h3>PV Inverter</h3>
+            <span class="slave">unit 2</span>
+          </div>
+          <div class="table-scroll">
+            <table>
+              <thead><tr><th>Addr</th><th>Point</th><th>Meaning</th></tr></thead>
+              <tbody>
+                <tr><td class="addr">0</td><td class="pt">INV.GenActivePW</td><td>Generated power</td></tr>
+                <tr><td class="addr">2</td><td class="pt">INV.APProductionKWH</td><td>Lifetime production</td></tr>
+                <tr><td class="addr">4</td><td class="pt">INV.LimitPower<span class="rw">W</span></td><td>Curtailment limit</td></tr>
+                <tr><td class="addr">6</td><td class="pt">INV.OemState</td><td>OEM state</td></tr>
+                <tr><td class="addr">8</td><td class="pt">INV.CtrlState</td><td>Control state</td></tr>
+                <tr><td class="addr">10</td><td class="pt">INV.Start</td><td>Start flag</td></tr>
+                <tr><td class="addr">12</td><td class="pt">INV.Stop</td><td>Stop flag</td></tr>
+                <tr><td class="addr">14</td><td class="pt">INV.State</td><td>Generating or idle</td></tr>
+                <tr><td class="addr">16</td><td class="pt">INV.APProduction</td><td>Instantaneous output</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <div class="map">
+          <div class="map-head">
+            <h3>Battery</h3>
+            <span class="slave">unit 5</span>
+          </div>
+          <div class="table-scroll">
+            <table>
+              <thead><tr><th>Addr</th><th>Point</th><th>Meaning</th></tr></thead>
+              <tbody>
+                <tr><td class="addr">0</td><td class="pt">BS.ActivePW</td><td>+ charge, &minus; discharge</td></tr>
+                <tr><td class="addr">2</td><td class="pt">BS.Soc</td><td>State of charge %</td></tr>
+                <tr><td class="addr">4</td><td class="pt">BS.MaxChargePower</td><td>Charge rate ceiling</td></tr>
+                <tr><td class="addr">6</td><td class="pt">BS.MaxDischargePower</td><td>Discharge rate ceiling</td></tr>
+                <tr><td class="addr">8</td><td class="pt">BS.EndChargeSOC</td><td>Upper SOC bound</td></tr>
+                <tr><td class="addr">10</td><td class="pt">BS.EndDischargeSOC</td><td>Lower SOC bound</td></tr>
+                <tr><td class="addr">12</td><td class="pt">BS.Soh</td><td>State of health</td></tr>
+                <tr><td class="addr">14</td><td class="pt">BS.SysAPSetPoint<span class="rw">W</span></td><td>Power command</td></tr>
+                <tr><td class="addr">16</td><td class="pt">BS.OemState</td><td>OEM state</td></tr>
+                <tr><td class="addr">18</td><td class="pt">BS.CtrlState</td><td>Control state</td></tr>
+                <tr><td class="addr">20</td><td class="pt">BS.TotalChargingEng</td><td>Lifetime charged</td></tr>
+                <tr><td class="addr">22</td><td class="pt">BS.TotalDischargingEng</td><td>Lifetime discharged</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <div class="map">
+          <div class="map-head">
+            <h3>EV Charger</h3>
+            <span class="slave">unit 4</span>
+          </div>
+          <div class="table-scroll">
+            <table>
+              <thead><tr><th>Addr</th><th>Point</th><th>Meaning</th></tr></thead>
+              <tbody>
+                <tr><td class="addr">0</td><td class="pt">PUB_CONN.ChargePW</td><td>Charging power</td></tr>
+                <tr><td class="addr">2</td><td class="pt">PUB_CONN.CurrentL1</td><td>Phase 1 current</td></tr>
+                <tr><td class="addr">4</td><td class="pt">PUB_CONN.CurrentL2</td><td>Phase 2 current</td></tr>
+                <tr><td class="addr">6</td><td class="pt">PUB_CONN.CurrentL3</td><td>Phase 3 current</td></tr>
+                <tr><td class="addr">8</td><td class="pt">PUB_CONN.ChargePWSet<span class="rw">W</span></td><td>Power setpoint</td></tr>
+                <tr><td class="addr">10</td><td class="pt">PUB_CONN.ChargeCurSetL1</td><td>Current setpoint</td></tr>
+                <tr><td class="addr">12</td><td class="pt">PUB_CONN.OemState</td><td>OEM state</td></tr>
+                <tr><td class="addr">14</td><td class="pt">PUB_CONN.ChargeEnergyKWH</td><td>Session energy</td></tr>
+                <tr><td class="addr">16</td><td class="pt">PUB_CONN.CtrlState</td><td>Control state</td></tr>
+                <tr><td class="addr">18</td><td class="pt">PUB_CONN.State</td><td>Charging or idle</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <div class="map">
+          <div class="map-head">
+            <h3>Building Load</h3>
+            <span class="slave">unit 8</span>
+          </div>
+          <div class="table-scroll">
+            <table>
+              <thead><tr><th>Addr</th><th>Point</th><th>Meaning</th></tr></thead>
+              <tbody>
+                <tr><td class="addr">0</td><td class="pt">Load.Power</td><td>Demand drawn</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+      </div>
+    </div>
+  </section>
+
+  <section id="config">
+    <div class="wrap">
+      <p class="eyebrow">Configuration</p>
+      <h2 class="col">One JSON file describes the site</h2>
+      <p class="col">
+        <code>config/device.json</code> sets the simulated wall-clock start and lists the devices.
+        Adding a second inverter or a third charger means adding an object, not touching code.
+      </p>
+
+      <div class="col" style="max-width: 72ch;">
+        <pre><code>{
+  <span class="key">"start_time"</span>: <span class="str">"14:19"</span>,          <span class="cmt">// simulation begins at 14:19</span>
+  <span class="key">"Devices"</span>: [
+    { <span class="key">"PV"</span>: [ {
+        <span class="key">"DeviceKey"</span>:  <span class="str">"PV_01"</span>,
+        <span class="key">"ratedPower"</span>: 100,
+        <span class="key">"mode"</span>:       0,              <span class="cmt">// 0 = CSV curve, 1 = synthetic</span>
+        <span class="key">"csv_file"</span>:   <span class="str">"pv_curve.csv"</span>,
+        <span class="key">"slave_id"</span>:   2
+    } ] }
+  ]
+}</code></pre>
+      </div>
+
+      <div class="split">
+        <div>
+          <h3>The simulated clock</h3>
+          <p>
+            Time starts at <code>start_time</code> and advances with real elapsed seconds, wrapping
+            at midnight. One real second is one simulated second — curves play out in real time, so
+            a full day takes a full day.
+          </p>
+        </div>
+        <div>
+          <h3>Power curves</h3>
+          <p>
+            <code>pv_curve.csv</code> and <code>load_curve.csv</code> hold 96 quarter-hour points
+            covering 24 hours, as <code>hour,kW</code> pairs. Values between points are linearly
+            interpolated.
+          </p>
+        </div>
+        <div>
+          <h3>Three log streams</h3>
+          <p>
+            Device state, protocol messages, and raw frame traffic each get their own rotating file
+            under <code>log/</code>, with independent levels. When a client sees a value it did not
+            expect, the traffic log has the bytes.
+          </p>
+        </div>
+        <div>
+          <h3>Running as a service</h3>
+          <p>
+            <code>MicroGridSimulator.service</code> is a systemd unit that restarts the simulator on
+            failure and routes output to syslog. Update the paths inside it to match wherever the
+            repository is checked out.
+          </p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section id="start">
+    <div class="wrap">
+      <p class="eyebrow">Getting started</p>
+      <h2 class="col">Run it</h2>
+      <p class="col">
+        There is nothing to install. Start the simulator from the repository root so the relative
+        config paths resolve, then point any Modbus client at port 5021.
+      </p>
+      <div class="col" style="max-width: 72ch;">
+        <pre><code>python3 main.py</code></pre>
+        <p class="note">
+          <b>Read the meter.</b> Unit 1, address 0, quantity 2 returns net active power as a signed
+          32-bit integer — divide by 100 for kW. A positive result means the site is importing from
+          the grid; negative means it is exporting.
+        </p>
+      </div>
+    </div>
+  </section>
+
+</main>
+
+<footer>
+  <div class="wrap">
+    MicroGrid Simulator · Python 3, standard library only · Modbus TCP on port 5021
+  </div>
+</footer>
