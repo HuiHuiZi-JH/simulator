@@ -95,6 +95,7 @@ modbus_server = None
 web_server = None
 simulation_start_time = None
 WEB_PORT = 8080
+raw_config = {}
 
 
 def current_sim_hour():
@@ -104,8 +105,9 @@ def current_sim_hour():
     return (START_HOUR + (time.time() - simulation_start_time) / 3600) % 24
 
 def load_config():
-    global devices_data, START_HOUR, simulation_start_time, WEB_PORT
+    global devices_data, START_HOUR, simulation_start_time, WEB_PORT, raw_config
     config = load_devices_config('config/device.json')
+    raw_config = config
     WEB_PORT = config.get('web_port', 8080)
     start_time = config['start_time']
     hh, mm = map(int, start_time.split(':'))
@@ -276,7 +278,8 @@ def main():
     update_thread = threading.Thread(target=update_device_data, daemon=False)
     update_thread.start()
     state_logger.info("Update thread started")
-    web_server = WebServer(devices_data, data_lock, current_sim_hour, WEB_PORT)
+    web_server = WebServer(devices_data, data_lock, current_sim_hour, WEB_PORT,
+                           raw_config)
     web_thread = threading.Thread(target=web_server.run, daemon=True)
     web_thread.start()
     state_logger.info("Web dashboard thread started on port %d", WEB_PORT)

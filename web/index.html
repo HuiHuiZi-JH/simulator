@@ -228,6 +228,72 @@
   .toast.show { opacity:1; }
   .toast.err { background:var(--con); color:#fff; }
 
+  /* ---- tabs + config ---- */
+  .tabs { display:flex; gap:.25rem; }
+  .tab {
+    font-family:Archivo,Arial,sans-serif; font-size:.8rem; font-weight:600;
+    padding:.35rem .8rem; border-radius:6px; cursor:pointer;
+    border:1px solid transparent; background:transparent; color:var(--muted);
+  }
+  .tab[aria-selected="true"] { background:var(--surface); color:var(--ink); border-color:var(--line); }
+  .tab:hover { color:var(--ink); }
+
+  .view[hidden] { display:none; }
+
+  .banner {
+    display:flex; align-items:center; gap:.7rem; flex-wrap:wrap;
+    margin-top:1rem; padding:.7rem .95rem; border-radius:8px;
+    background:var(--con-soft); color:var(--con);
+    border:1px solid color-mix(in srgb,var(--con) 30%,transparent);
+    font-size:.84rem; font-weight:600;
+  }
+  .banner code { background:transparent; font-size:.82rem; }
+
+  .cfg-card {
+    background:var(--surface); border:1px solid var(--line);
+    border-radius:10px; padding:1.15rem 1.2rem 1.25rem; margin-bottom:1rem;
+  }
+  .cfg-card > header {
+    display:flex; align-items:center; justify-content:space-between;
+    gap:.6rem; margin-bottom:.9rem; flex-wrap:wrap;
+  }
+  .cfg-card h3 { margin:0; font-size:.98rem; font-weight:600; }
+  .typetag {
+    font-family:"IBM Plex Mono",monospace; font-size:.65rem; letter-spacing:.08em;
+    text-transform:uppercase; color:var(--accent); background:var(--accent-soft);
+    padding:.16rem .45rem; border-radius:3px;
+  }
+  .fields { display:grid; gap:.75rem; grid-template-columns:repeat(auto-fit,minmax(11rem,1fr)); }
+  .field { display:flex; flex-direction:column; gap:.25rem; min-width:0; }
+  .field > label {
+    font-family:"IBM Plex Mono",monospace; font-size:.68rem;
+    letter-spacing:.05em; color:var(--faint);
+  }
+  .field input, .field select {
+    font-family:"IBM Plex Mono",monospace; font-size:.8rem;
+    padding:.38rem .5rem; border-radius:5px; min-width:0;
+    border:1px solid var(--line); background:var(--sunken); color:var(--ink);
+  }
+  .field.req > label::after { content:" *"; color:var(--con); }
+
+  .sched { display:flex; flex-direction:column; gap:.4rem; }
+  .sched-row { display:flex; gap:.4rem; align-items:center; }
+  .sched-row input { width:6rem; }
+  button.danger { border-color:var(--con); background:transparent; color:var(--con); }
+  button.small { font-size:.72rem; padding:.28rem .55rem; }
+
+  .cfg-actions {
+    display:flex; gap:.6rem; align-items:center; flex-wrap:wrap;
+    margin:1.25rem 0 .5rem; position:sticky; bottom:0;
+    background:var(--ground); padding:.75rem 0; border-top:1px solid var(--hairline);
+  }
+  .errors {
+    margin:.75rem 0 0; padding:.8rem 1rem .8rem 2rem; border-radius:8px;
+    background:var(--con-soft); color:var(--con); font-size:.83rem;
+  }
+  .errors li { margin-bottom:.25rem; }
+  .hint { color:var(--faint); font-size:.8rem; margin:.3rem 0 0; }
+
   .empty {
     padding:2.5rem 1rem; text-align:center; color:var(--faint);
     border:1px dashed var(--line); border-radius:10px; font-size:.9rem;
@@ -243,6 +309,10 @@
 <div class="topbar">
   <div class="wrap topbar-in">
     <div class="brand">MicroGrid <span>Simulator</span></div>
+    <div class="tabs" role="tablist">
+      <button class="tab" id="tab-live" role="tab" aria-selected="true" aria-controls="view-live">Live</button>
+      <button class="tab" id="tab-config" role="tab" aria-selected="false" aria-controls="view-config">Configuration</button>
+    </div>
     <div class="clock">sim <b id="simclock">--:--</b></div>
     <div class="clock">host <b id="wallclock">--:--:--</b></div>
     <div class="status down" id="status"><span class="dot"></span><span id="statustext">connecting</span></div>
@@ -250,6 +320,13 @@
 </div>
 
 <main class="wrap">
+
+  <div class="banner" id="restart-banner" hidden>
+    <span>Configuration on disk has changed &mdash; restart the simulator to apply it.</span>
+    <code>python3 main.py</code>
+  </div>
+
+  <div class="view" id="view-live" role="tabpanel" aria-labelledby="tab-live">
 
   <section class="hero" aria-labelledby="pcc-label">
     <div class="hero-grid">
@@ -286,6 +363,41 @@
   <div class="grid" id="devices">
     <div class="empty">Waiting for the simulator…</div>
   </div>
+
+  </div><!-- /view-live -->
+
+  <div class="view" id="view-config" role="tabpanel" aria-labelledby="tab-config" hidden>
+    <h2>Site configuration</h2>
+    <div class="cfg-card">
+      <div class="fields">
+        <div class="field">
+          <label for="cfg-start">Simulation start time</label>
+          <input type="time" id="cfg-start" value="00:00">
+        </div>
+        <div class="field">
+          <label for="cfg-port">Dashboard port</label>
+          <input type="number" id="cfg-port" min="1" max="65535" value="8080">
+        </div>
+      </div>
+      <p class="hint">Changing the port takes effect on the next start, at the new address.</p>
+    </div>
+
+    <h2>Devices</h2>
+    <div id="cfg-devices"></div>
+
+    <div class="cfg-actions">
+      <select id="cfg-newtype" aria-label="Type of device to add"></select>
+      <button class="ghost" id="cfg-add">Add device</button>
+      <span style="flex:1"></span>
+      <button class="ghost" id="cfg-reload">Discard changes</button>
+      <button id="cfg-save">Save to device.json</button>
+    </div>
+    <ul class="errors" id="cfg-errors" hidden></ul>
+    <p class="hint">
+      Saving rewrites <code>config/device.json</code> and keeps the previous version as
+      <code>device.json.bak</code>. The running simulation is not affected until you restart it.
+    </p>
+  </div><!-- /view-config -->
 
   <footer>
     Reads and writes go through the same <code class="mono">devices_data</code> table as the Modbus
@@ -543,6 +655,7 @@
   /* ---------- poll ---------- */
 
   function render(state) {
+    $("restart-banner").hidden = !state.restart_needed;
     $("simclock").textContent = hourToClock(state.sim_hour);
     $("wallclock").textContent = state.wall_time;
 
@@ -601,6 +714,256 @@
         setStatus(false, failures > 3 ? "disconnected" : "retrying");
       });
   }
+
+
+  /* ---------- configuration view ---------- */
+
+  var cfg = null;      // working copy, edited in place
+  var schema = null;
+  var types = [];
+
+  function el(tag, cls, text) {
+    var n = document.createElement(tag);
+    if (cls) n.className = cls;
+    if (text !== undefined) n.textContent = text;
+    return n;
+  }
+
+  function flatDevices(config) {
+    // device.json nests as Devices:[{Type:[dev,...]},...]; flatten for editing.
+    var out = [];
+    (config.Devices || []).forEach(function (group) {
+      Object.keys(group).forEach(function (type) {
+        (group[type] || []).forEach(function (dev) { out.push({ type: type, dev: dev }); });
+      });
+    });
+    return out;
+  }
+
+  function rebuildDevices(list) {
+    // Group back into the file's shape, one group per type, order preserved.
+    var order = [], byType = {};
+    list.forEach(function (item) {
+      if (!byType[item.type]) { byType[item.type] = []; order.push(item.type); }
+      byType[item.type].push(item.dev);
+    });
+    return order.map(function (t) { var g = {}; g[t] = byType[t]; return g; });
+  }
+
+  function field(labelText, required, input) {
+    var f = el("div", "field" + (required ? " req" : ""));
+    var lab = el("label", null, labelText);
+    var id = "f" + (field._n = (field._n || 0) + 1);
+    input.id = id; lab.htmlFor = id;
+    f.appendChild(lab); f.appendChild(input);
+    return f;
+  }
+
+  function numberInput(dev, key) {
+    var i = document.createElement("input");
+    i.type = "number"; i.step = "any";
+    i.value = dev[key] === undefined ? "" : dev[key];
+    i.addEventListener("input", function () {
+      if (i.value === "") delete dev[key];
+      else dev[key] = parseFloat(i.value);
+    });
+    return i;
+  }
+
+  function textInput(dev, key) {
+    var i = document.createElement("input");
+    i.type = "text";
+    i.value = dev[key] === undefined ? "" : dev[key];
+    i.addEventListener("input", function () {
+      if (i.value === "") delete dev[key];
+      else dev[key] = i.value;
+    });
+    return i;
+  }
+
+  function modeInput(dev, key) {
+    var sel = document.createElement("select");
+    [["0", "CSV curve"], ["1", "Synthetic"]].forEach(function (o) {
+      var opt = document.createElement("option");
+      opt.value = o[0]; opt.textContent = o[1];
+      sel.appendChild(opt);
+    });
+    sel.value = String(dev[key] === undefined ? 0 : dev[key]);
+    sel.addEventListener("change", function () { dev[key] = parseInt(sel.value, 10); });
+    return sel;
+  }
+
+  function scheduleEditor(dev, key) {
+    var wrap = el("div", "field");
+    wrap.appendChild(el("label", null, "Charging windows"));
+    var box = el("div", "sched");
+    wrap.appendChild(box);
+
+    function draw() {
+      box.innerHTML = "";
+      var windows = dev[key] || (dev[key] = []);
+      windows.forEach(function (w, i) {
+        var row = el("div", "sched-row");
+        ["start", "stop"].forEach(function (which) {
+          var t = document.createElement("input");
+          t.type = "time"; t.value = w[which] || "";
+          t.setAttribute("aria-label", which + " time for window " + (i + 1));
+          t.addEventListener("input", function () { w[which] = t.value; });
+          row.appendChild(t);
+        });
+        var rm = el("button", "danger small", "Remove");
+        rm.type = "button";
+        rm.addEventListener("click", function () { windows.splice(i, 1); draw(); });
+        row.appendChild(rm);
+        box.appendChild(row);
+      });
+      var add = el("button", "ghost small", "Add window");
+      add.type = "button";
+      add.addEventListener("click", function () {
+        windows.push({ start: "08:00", stop: "10:00" }); draw();
+      });
+      box.appendChild(add);
+    }
+    draw();
+    return wrap;
+  }
+
+  function deviceCard(item, index, list, redraw) {
+    var card = el("article", "cfg-card");
+    var head = document.createElement("header");
+    var title = el("h3", null, item.dev.DeviceKey || "(unnamed)");
+    head.appendChild(title);
+    var right = el("div");
+    right.style.display = "flex";
+    right.style.gap = ".5rem";
+    right.style.alignItems = "center";
+    right.appendChild(el("span", "typetag", item.type));
+    var del = el("button", "danger small", "Remove");
+    del.type = "button";
+    del.addEventListener("click", function () {
+      if (confirm("Remove " + (item.dev.DeviceKey || "this device") + "?")) {
+        list.splice(index, 1); redraw();
+      }
+    });
+    right.appendChild(del);
+    head.appendChild(right);
+    card.appendChild(head);
+
+    var fields = el("div", "fields");
+
+    var keyIn = document.createElement("input");
+    keyIn.type = "text"; keyIn.value = item.dev.DeviceKey || "";
+    keyIn.addEventListener("input", function () {
+      item.dev.DeviceKey = keyIn.value;
+      title.textContent = keyIn.value || "(unnamed)";
+    });
+    fields.appendChild(field("Device key", true, keyIn));
+
+    var slaveIn = document.createElement("input");
+    slaveIn.type = "number"; slaveIn.min = 1; slaveIn.max = 247;
+    slaveIn.value = item.dev.slave_id === undefined ? "" : item.dev.slave_id;
+    slaveIn.addEventListener("input", function () {
+      if (slaveIn.value === "") delete item.dev.slave_id;
+      else item.dev.slave_id = parseInt(slaveIn.value, 10);
+    });
+    fields.appendChild(field("Slave ID (1-247)", false, slaveIn));
+
+    (schema[item.type] || []).forEach(function (spec) {
+      var key = spec[0], label = spec[1], kind = spec[2], required = spec[3];
+      if (kind === "schedule") { card.appendChild(fields); card.appendChild(scheduleEditor(item.dev, key)); fields = el("div", "fields"); return; }
+      var input = kind === "number" ? numberInput(item.dev, key)
+                : kind === "mode"   ? modeInput(item.dev, key)
+                                    : textInput(item.dev, key);
+      fields.appendChild(field(label, required, input));
+    });
+    if (fields.childNodes.length) card.appendChild(fields);
+    return card;
+  }
+
+  function renderConfig() {
+    $("cfg-start").value = cfg.start_time || "00:00";
+    $("cfg-port").value = cfg.web_port === undefined ? 8080 : cfg.web_port;
+
+    var list = flatDevices(cfg);
+    var host = $("cfg-devices");
+    host.innerHTML = "";
+
+    var redraw = function () { cfg.Devices = rebuildDevices(list); renderConfig(); };
+    list.forEach(function (item, i) {
+      host.appendChild(deviceCard(item, i, list, redraw));
+    });
+    cfg.Devices = rebuildDevices(list);
+    renderConfig._list = list;
+  }
+
+  function loadConfig() {
+    return fetch("/api/config", { cache: "no-store" })
+      .then(function (r) { return r.json(); })
+      .then(function (data) {
+        if (data.error) { toast(data.error, true); return; }
+        cfg = data.config; schema = data.schema; types = data.types;
+        var sel = $("cfg-newtype");
+        sel.innerHTML = "";
+        types.forEach(function (t) {
+          var o = document.createElement("option");
+          o.value = t; o.textContent = t;
+          sel.appendChild(o);
+        });
+        $("cfg-errors").hidden = true;
+        renderConfig();
+      })
+      .catch(function (e) { toast("Could not load configuration: " + e.message, true); });
+  }
+
+  function saveConfig() {
+    cfg.start_time = $("cfg-start").value || "00:00";
+    cfg.web_port = parseInt($("cfg-port").value, 10) || 8080;
+
+    fetch("/api/config", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ config: cfg })
+    }).then(function (r) { return r.json(); }).then(function (res) {
+      var box = $("cfg-errors");
+      if (res.ok) {
+        box.hidden = true;
+        toast(res.message);
+        $("restart-banner").hidden = !res.restart_needed;
+      } else {
+        box.hidden = false;
+        box.innerHTML = "";
+        (res.errors || ["Unknown problem"]).forEach(function (msg) {
+          box.appendChild(el("li", null, msg));
+        });
+        toast(res.message || "Not saved", true);
+        box.scrollIntoView({ behavior: "smooth", block: "nearest" });
+      }
+    }).catch(function (e) { toast("Could not save: " + e.message, true); });
+  }
+
+  /* ---------- tabs ---------- */
+
+  function showTab(which) {
+    var live = which === "live";
+    $("tab-live").setAttribute("aria-selected", live);
+    $("tab-config").setAttribute("aria-selected", !live);
+    $("view-live").hidden = !live;
+    $("view-config").hidden = live;
+    if (!live && !cfg) loadConfig();
+  }
+
+  $("tab-live").addEventListener("click", function () { showTab("live"); });
+  $("tab-config").addEventListener("click", function () { showTab("config"); });
+  $("cfg-save").addEventListener("click", saveConfig);
+  $("cfg-reload").addEventListener("click", function () { cfg = null; loadConfig(); });
+  $("cfg-add").addEventListener("click", function () {
+    var type = $("cfg-newtype").value;
+    var list = renderConfig._list || flatDevices(cfg);
+    var n = list.filter(function (i) { return i.type === type; }).length + 1;
+    list.push({ type: type, dev: { DeviceKey: type + "_" + String(n).padStart(2, "0") } });
+    cfg.Devices = rebuildDevices(list);
+    renderConfig();
+  });
 
   poll();
   setInterval(poll, POLL_MS);

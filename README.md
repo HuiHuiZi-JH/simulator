@@ -143,10 +143,20 @@ models. The rest are overwritten on the next tick.
 A browser UI served by the simulator itself on port 8080, built on `http.server` — no
 dependencies, in keeping with Rule 1's conventions.
 
-It shows the point of common coupling as the headline figure with a rolling sparkline, then a card
-per device with live power, state, accumulated energy, and battery SOC. The three control
+The dashboard has two tabs.
+
+**Live** shows the point of common coupling as the headline figure with a rolling sparkline, then
+a card per device with live power, state, accumulated energy, and battery SOC. The three control
 registers get a slider and a numeric field, so curtailing the inverter or commanding the battery
 takes a drag rather than a hand-built Modbus frame.
+
+**Configuration** edits `config/device.json` in a form — start time, dashboard port, and every
+device's fields, including EV charging windows. Devices can be added and removed. Saving is
+validated before anything is written, and rejected saves leave the file untouched.
+
+Configuration changes do **not** affect the running simulation. `device.json` is read once at
+startup, so a save raises a restart banner and the new settings take effect on the next
+`python3 main.py`. Restarting also resets SOC, energy counters, and the simulated clock.
 
 ### API
 
@@ -155,6 +165,8 @@ takes a drag rather than a hand-built Modbus frame.
 | `GET` | `/` | The dashboard page (`web/index.html`) |
 | `GET` | `/api/state` | JSON snapshot: every device, its named points, config limits |
 | `POST` | `/api/control` | Write one control register |
+| `GET` | `/api/config` | Current `device.json`, the editable field schema, and the restart flag |
+| `POST` | `/api/config` | Validate and write `device.json` |
 
 ```
 curl -X POST http://localhost:8080/api/control \
@@ -165,8 +177,20 @@ curl -X POST http://localhost:8080/api/control \
 Writes are refused unless the point is one of the three control registers listed above —
 everything else is an output the next tick would overwrite, so accepting it would be misleading.
 
+### Editing configuration safely
+
+`POST /api/config` validates the whole document before touching disk. It checks the start-time
+format, port range, device types, required fields per type, charging-window times, and that
+`DeviceKey` and `slave_id` are unique and in range. If anything fails, nothing is written and the
+problems come back as a list.
+
+Writes are atomic — the new file goes to `device.json.tmp` and is swapped in with `os.replace`, so
+an interrupted save can never leave a truncated `device.json`. The previous version is kept as
+`config/device.json.bak` (gitignored).
+
 The dashboard polls `/api/state` once a second. It is not authenticated and binds `0.0.0.0`; keep
-it on a trusted network or change the bind address before exposing it.
+it on a trusted network or change the bind address before exposing it. Anyone who can reach the
+dashboard can rewrite `device.json`.
 
 ---
 
