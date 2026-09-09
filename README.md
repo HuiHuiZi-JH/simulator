@@ -12,15 +12,16 @@ No third-party dependencies. Python 3, standard library only.
 
 **These rules govern all work in this repository. Read them before changing code.**
 
-1. **README.md is the source of truth.** Every rule and convention for this project is written
+1. **Every change is pushed to GitHub, for recording purposes.** GitHub is the record of
+   this project — every change must land there so the history is complete and nothing exists
+   only on one machine. Do not stop at a local commit. Run `git push` after committing.
+
+2. **README.md is the source of truth.** Every rule and convention for this project is written
    here. Do not keep rules in your head, in commit messages, or in comments only.
 
-2. **Every code change goes through README.md.** Before changing code, read this file for the
+3. **Every code change goes through README.md.** Before changing code, read this file for the
    rules that apply. After changing code, update the affected section of this file **in the same
    commit** so documentation never drifts from behaviour.
-
-3. **Every change is pushed to GitHub.** Do not stop at a local commit. Run `git push` so
-   `origin` always reflects the working state.
 
 ### Conventions these rules protect
 
