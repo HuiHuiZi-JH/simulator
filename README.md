@@ -156,6 +156,19 @@ up, discharging (-) pulls it down.
 having its own type is what keeps it out of the Tower 10 figure. Adding the virtual point changed
 nothing about what unit 1 reports.
 
+**Nothing above the boundary may feed back below it.** `VirtualGridModel` reads `devices_data` and
+never writes to it, and no other device type contributes to it. The failure mode is silent — the
+Tower 10 meter would just start reporting a different number — so the invariant is pinned by
+tests rather than left to inspection:
+
+```
+python3 -m unittest discover -s test -t .
+```
+
+`test/test_isolation.py` asserts that `MeterModel` returns the identical value with and without
+the off-loop devices present, that an arbitrarily large JTC common load does not move it, and that
+a virtual grid update leaves every other device's registers untouched.
+
 ### The three static settings
 
 The EGC regulates the virtual site with three fixed limits. The simulator publishes them as
@@ -469,6 +482,8 @@ When a client sees a value it did not expect, the traffic log has the bytes.
 
 ```
 main.py                          entry point, threads, tick loop
+test/
+  test_isolation.py              the Tower 10 loop is unaffected by the virtual point
 config/
   device.json                    site definition
   modbus_registers.py            point name → register offset
