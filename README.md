@@ -152,11 +152,15 @@ The virtual point is `JTC common load + BESS`: the JTC common load figure alread
 Tower 10 that moves the virtual import on its own. Battery charging (+) pushes the virtual import
 up, discharging (-) pulls it down.
 
-For the same reason **the `Load` device under Tower 10 ships with an all-zero curve.** T98's
-demand is already carried by the JTC common load figure, so giving `LOAD_001` a profile of its own
-would count that demand twice. The device stays in place — it is the T98 load point, and it is
-where a real profile belongs once T98's own metering is available — but today it contributes
-nothing to either measurement.
+**The `Load` device under Tower 10 ships with an all-zero curve.** T98's demand is already carried
+by the JTC common load figure above the boundary, so the site is fully represented without it, and
+`LOAD_001` is left flat rather than restating demand that is already accounted for.
+
+This only changes what `Meter_01` reports — with the curve at zero the Tower 10 point reads
+`EV + BESS - PV`, so it shows PV export whenever nothing local is drawing. It does not affect the
+virtual grid point at all: `VirtualGridModel` never reads `Load`, so the curve could not have
+double-counted into it whatever its values. The device stays in place — it is the T98 load point,
+and it is where a real profile belongs once T98's own metering is available.
 
 `MeterModel` only sums the types it knows — `PV`, `BESS`, `EV`, `Load` — so the JTC common load
 having its own type is what keeps it out of the Tower 10 figure. Adding the virtual point changed
