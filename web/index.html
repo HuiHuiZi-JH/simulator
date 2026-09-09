@@ -555,6 +555,12 @@
       offLoop: true,          // outside the Tower 10 control loop
       rows: []
     },
+    T7PV: {
+      title: "Tower 7 PV", role: "is-gen",
+      primary: "T7PV.GenActivePW",
+      offLoop: true,          // outside the Tower 10 network
+      rows: [["Produced", "T7PV.APProductionKWH", "kWh", 2]]
+    },
     VirtualGrid: {
       title: "Virtual Grid Incoming", role: "is-both",
       primary: "VG.ActivePower",
@@ -656,7 +662,7 @@
     if (Math.abs(power) < 0.005) {
       pill.className = "statepill off"; pill.textContent = "idle";
       el.className = "card is-idle";
-    } else if (dev.type === "PV" ||
+    } else if (dev.type === "PV" || dev.type === "T7PV" ||
                ((dev.type === "BESS" || dev.type === "VirtualGrid") && power < 0)) {
       pill.className = "statepill on";
       pill.textContent = (spec.pill && spec.pill.on) ||

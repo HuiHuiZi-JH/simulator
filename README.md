@@ -98,7 +98,7 @@ The dashboard's **Match local time on start** checkbox toggles between the two.
 
 ## Device models
 
-Seven model classes in `src/models/`. Five simulate device behaviour from config and a clock; the
+Eight model classes in `src/models/`. Six simulate device behaviour from config and a clock; the
 meter and the virtual grid point have no physics of their own and derive everything from the
 others.
 
@@ -108,7 +108,8 @@ others.
 | `BatteryModel` | `BESS` | Integrates a signed power command into SOC. On hitting the SOC ceiling or floor it back-calculates the energy actually absorbed, so the kWh counters stay honest. |
 | `EVModel` | `EV` | Draws rated power inside configured charging windows (midnight-wrapping supported), capped by the written setpoint, converted to balanced three-phase currents. |
 | `LoadModel` | `Load` | Replays a demand profile interpolated from CSV at quarter-hour resolution, or jitters 80–120% of base power. |
-| `JTCLoadModel` | `JTCLoad` | The JTC common load — landlord and common services. Its own algorithm, sharing no code with `LoadModel`: an operator-supplied CSV, linearly interpolated at any resolution and wrapped across midnight. No synthetic mode and no base power — the curve or nothing. |
+| `JTCLoadModel` | `JTCLoad` | The JTC common load — landlord and common services. Its own algorithm, sharing no code with `LoadModel`: an operator-supplied CSV read through `DayCurve`, linearly interpolated at any resolution and wrapped across midnight. No synthetic mode and no base power — the curve or nothing. |
+| `T7PVModel` | `T7PV` | Tower 7's PV plant, outside the Tower 10 network. The same direct `DayCurve` readout as the JTC common load, plus an integrated kWh total. No irradiance model, no synthetic arc, no curtailment input. |
 | `MeterModel` | `Meter` | **Derived.** Sums the other devices into net power at the point of common coupling, then integrates it on a monotonic clock into separate import and export counters. |
 | `VirtualGridModel` | `VirtualGrid` | **Derived.** Sums the JTC common load and the battery into the virtual grid incoming figure the EGC regulates against, with its own import and export counters and the three static settings. |
 
@@ -132,6 +133,7 @@ incoming meter:
                           |
 --------------------------+--------------------------  EGC control boundary
    towers 5/6/7, podium and basement are pass-through and hidden from the loop
+   T7 PV is simulated on its own, outside both measurements
           |                                   |
    JTC Common Load                      Tower 10 (T98)
    landlord / common services           whole T98 load
@@ -144,13 +146,36 @@ Two measurement points therefore exist, and they are deliberately independent:
 
 | Point | Device | Sums |
 |---|---|---|
-| Tower 10 coupling point | `Meter_01`, unit 1 | `Load` + `EV` - `PV` + `BESS` |
+| Tower 10 grid meter | `Meter_01`, unit 1 | `Load` + `EV` - `PV` + `BESS` |
 | Virtual grid incoming | `VGRID_01`, unit 6 | `JTCLoad` + `BESS` |
+
+`Meter_01` is the grid meter for the Tower 10 network: the T10 battery, inverter, charger and load
+are its terms and nothing else. `T7PV` and `JTCLoad` are in neither sum.
 
 The virtual point is `JTC common load + BESS`: the JTC common load figure already contains Tower
 10's own demand, so T98 is not added a second time, and the battery is the one element under
 Tower 10 that moves the virtual import on its own. Battery charging (+) pushes the virtual import
 up, discharging (-) pulls it down.
+
+### Tower 7 PV
+
+`T7_PV_01` simulates the PV plant on Tower 7, one of the towers the EGC does not control. It is
+**excluded from the Tower 10 network and from the virtual grid figure alike** — nothing derives
+from it. `MeterModel` matches the type `PV`, so the T7 plant carries its own type `T7PV` and
+cannot land in the Tower 10 meter; `VirtualGridModel` sums the JTC common load and the battery, so
+it is not in that figure either. It is a straight readout of an operator-supplied curve, published
+positive like the Tower 10 inverter, with its generated energy integrated alongside:
+
+```json
+{ "T7PV": [ {
+    "DeviceKey": "T7_PV_01",
+    "csv_file":  "t7_pv_curve.csv",
+    "slave_id":  10
+} ] }
+```
+
+Should it ever need to feed the virtual point, name it in that device's `sources` list rather than
+changing any model.
 
 ### The JTC common load
 
@@ -185,7 +210,11 @@ Configure it with nothing but its curve:
 
 To use your own profile, drop the file in `config/` and point `csv_file` at it — or give an
 absolute path — then restart. `config/jtc_common_curve.csv` is a worked example, not a fixture the
-code depends on.
+code depends on; the shipped one runs in the **100–200 kW** band.
+
+Tower 7's PV reads its curve exactly the same way — both go through `DayCurve` in
+`src/models/curve.py`, which is shared only between these two operator-fed devices. The older
+models keep their own loaders; nothing about them changed.
 
 **The `Load` device under Tower 10 ships with an all-zero curve.** T98's demand is already carried
 by the JTC common load figure above the boundary, so the site is fully represented without it, and
@@ -214,7 +243,10 @@ python3 -m unittest discover -s test -t .
 the off-loop devices present, that an arbitrarily large JTC common load does not move it, and that
 a virtual grid update leaves every other device's registers untouched.
 `test/test_jtc_load.py` covers the common-load curve reader: header detection, comments and blank
-lines, midnight wrapping, and that a missing or empty file raises rather than falling back.
+lines, midnight wrapping, that a missing or empty file raises rather than falling back, and that
+the shipped curve stays inside its 100–200 kW band at every interpolated instant, not just at the
+sampled points. `test/test_t7_pv.py` does the same for Tower 7, and the isolation suite asserts
+that 150 kW of T7 generation moves neither the Tower 10 meter nor the virtual grid point.
 
 ### The three static settings
 
@@ -230,8 +262,8 @@ instead of carrying its own copy:
 
 They are configuration, not physics: nothing in the simulator enforces them. Exceeding the import
 cap is exactly the condition a controller under test is supposed to detect and correct — with the
-shipped curve, commanding 500 kW of charge at the afternoon peak puts the virtual point at
-1,740 kW, 40 kW over the cap.
+shipped 100–200 kW common-load curve, the battery is what gets there: commanding about 1,500 kW of
+charge at the afternoon peak puts the virtual point over 1,700 kW.
 
 ---
 
@@ -409,6 +441,13 @@ Offsets are relative to base address 0 for each unit. **W** marks a control inpu
 | 20 | `BS.TotalChargingEng` | Lifetime charged |
 | 22 | `BS.TotalDischargingEng` | Lifetime discharged |
 
+### Tower 7 PV — unit 10
+
+| Addr | Point | Meaning |
+|---|---|---|
+| 0 | `T7PV.GenActivePW` | Generated power, outside the Tower 10 network |
+| 2 | `T7PV.APProductionKWH` | Accumulated production |
+
 ### Building load — unit 8
 
 | Addr | Point | Meaning |
@@ -492,12 +531,14 @@ The loader discards the first row as a header. `jtc_common_curve.csv` therefore 
 literal `hour,kW` line and keeps all 96 points; the two older files have no header and lose their
 midnight point — see Known issues.
 
-`jtc_common_curve.csv` is read by `JTCLoadModel`, not by the loaders above, so it follows the
-looser rules described under Site model — header optional, any resolution, midnight wrap. The
-shipped file is a landlord common-services day: about 530 kW overnight, ramping from 06:00 to a
-1,450 kW plateau in the early afternoon, then falling back through the evening. It is sized
-against the 1,700 kW import cap so that battery charging at the peak drives the virtual point over
-the limit. Replace it with real data whenever you have it.
+`jtc_common_curve.csv` and `t7_pv_curve.csv` are read through `DayCurve`, not by the loaders
+above, so they follow the looser rules described under Site model — header optional, any
+resolution, midnight wrap. Both are examples to replace with real data:
+
+| File | Shape | Range |
+|---|---|---|
+| `jtc_common_curve.csv` | landlord common-services day — flat overnight, ramping from 06:00 to an early-afternoon plateau, falling away through the evening | 102–200 kW |
+| `t7_pv_curve.csv` | solar day — dark until about 06:45, peaking early afternoon, dark again by 19:30 | 0–150 kW |
 
 `load_curve.csv` is all zeros, deliberately — see Site model above for why. Put a T98 profile in
 it and the Tower 10 meter picks it up on the next restart; nothing else needs changing.
@@ -538,16 +579,19 @@ main.py                          entry point, threads, tick loop
 test/
   test_isolation.py              the Tower 10 loop is unaffected by the virtual point
   test_jtc_load.py               the JTC common load curve reader
+  test_t7_pv.py                  the Tower 7 PV curve reader
 config/
   device.json                    site definition
   modbus_registers.py            point name → register offset
   logging_config.json            log levels and files
   pv_curve.csv, load_curve.csv   24h power profiles
   jtc_common_curve.csv           24h JTC common load profile
+  t7_pv_curve.csv                24h Tower 7 PV profile
 src/
   communication/modbus_server.py Modbus TCP server
   communication/web_server.py    dashboard HTTP server and JSON API
-  models/                        seven device models
+  models/                        eight device models
+  models/curve.py                shared reader for operator-supplied curves
 web/
   index.html                     the dashboard UI
 utils/

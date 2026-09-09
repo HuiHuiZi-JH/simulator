@@ -40,11 +40,11 @@ class CurveLoading(unittest.TestCase):
         # keeps midnight when there is no header to skip.
         self.assertEqual(len(with_header.curve), 2)
         self.assertEqual(len(without_header.curve), 2)
-        self.assertEqual(with_header.curve, without_header.curve)
+        self.assertEqual(with_header.curve.points, without_header.curve.points)
 
     def test_blank_and_commented_lines_are_skipped(self):
         m = self.model("hour,kW\n\n# overnight\n0.0,100\n\n12.0,400\n")
-        self.assertEqual(m.curve, [(0.0, 100.0), (12.0, 400.0)])
+        self.assertEqual(m.curve.points, [(0.0, 100.0), (12.0, 400.0)])
 
     def test_missing_file_fails_loudly(self):
         with self.assertRaises(ValueError):
@@ -94,8 +94,18 @@ class ShippedCurve(unittest.TestCase):
         m = JTCLoadModel({'DeviceKey': 'JTC_COMMON_01',
                           'csv_file': 'jtc_common_curve.csv'}, 0.0)
         self.assertEqual(len(m.curve), 96)
-        self.assertAlmostEqual(m.interpolate(0.0), 560.0)
-        self.assertAlmostEqual(m.interpolate(14.0), 1450.0)
+
+    def test_repository_curve_stays_in_the_configured_band(self):
+        # The shipped example is scaled to the 100-200 kW band the site runs
+        # at; replacing the file is expected, dropping out of band is not.
+        m = JTCLoadModel({'DeviceKey': 'JTC_COMMON_01',
+                          'csv_file': 'jtc_common_curve.csv'}, 0.0)
+        low, high = m.curve.span
+        self.assertGreaterEqual(low, 100.0)
+        self.assertLessEqual(high, 200.0)
+        # Every interpolated instant of the day, not just the sampled points.
+        for i in range(0, 2400):
+            self.assertTrue(100.0 <= m.interpolate(i / 100.0) <= 200.0)
 
 
 if __name__ == '__main__':

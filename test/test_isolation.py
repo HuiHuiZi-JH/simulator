@@ -33,6 +33,7 @@ def t98_devices():
 def off_loop_devices():
     return {
         'JTC_COMMON_01': {'type': 'JTCLoad',     'model': object(), 'data': {0: 1240.0}},
+        'T7_PV_01':      {'type': 'T7PV',        'model': object(), 'data': {0: 150.0}},
         'VGRID_01':      {'type': 'VirtualGrid', 'model': object(), 'data': {0: 0.0}},
     }
 
@@ -57,6 +58,23 @@ class MeterIsolation(unittest.TestCase):
         self.assertAlmostEqual(meter['ActivePower'], 527.0)
 
 
+class T7PVIsolation(unittest.TestCase):
+    """Tower 7 is pass-through: its PV belongs to neither measurement."""
+
+    def setUp(self):
+        self.devices = dict(t98_devices())
+        self.devices.update(off_loop_devices())
+
+    def test_t7_pv_stays_out_of_the_tower_10_meter(self):
+        meter = MeterModel({'DeviceKey': 'Meter_01'}, self.devices, data_lock, 12.0).update()
+        self.assertAlmostEqual(meter['ActivePower'], 527.0)   # unchanged by 150 kW of T7 PV
+
+    def test_t7_pv_stays_out_of_the_virtual_grid_point(self):
+        out = VirtualGridModel({'DeviceKey': 'VGRID_01'}, self.devices,
+                               data_lock, 12.0).update()
+        self.assertAlmostEqual(out['VG.ActivePower'], 1740.0)
+
+
 class VirtualGridIsolation(unittest.TestCase):
     def setUp(self):
         self.devices = dict(t98_devices())
@@ -72,8 +90,9 @@ class VirtualGridIsolation(unittest.TestCase):
 
     def test_sums_jtc_common_load_and_bess_only(self):
         out = VirtualGridModel(self.cfg, self.devices, data_lock, 12.0).update()
-        # 1240 common load + 500 charge; the T98 load, EV and PV are already
-        # inside the common-load figure and must not be counted again.
+        # 1240 common load + 500 charge. The T98 load, EV and PV are already
+        # inside the common-load figure, and the T7 plant is outside the
+        # boundary altogether -- none of them may be counted here.
         self.assertAlmostEqual(out['VG.ActivePower'], 1740.0)
         self.assertAlmostEqual(out['VG.MaxImport'], 1700.0)
 

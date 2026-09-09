@@ -16,6 +16,7 @@ from src.models.ev_model import EVModel
 from src.models.meter_model import MeterModel
 from src.models.load_model import LoadModel
 from src.models.jtc_load_model import JTCLoadModel
+from src.models.t7_pv_model import T7PVModel
 from src.models.virtual_grid_model import VirtualGridModel
 from config.modbus_registers import REGISTERS
 
@@ -216,6 +217,8 @@ def load_config():
                         devices_data[device_key]['model'] = LoadModel(dev, START_HOUR)
                     elif dev_type == 'JTCLoad':
                         devices_data[device_key]['model'] = JTCLoadModel(dev, START_HOUR)
+                    elif dev_type == 'T7PV':
+                        devices_data[device_key]['model'] = T7PVModel(dev, START_HOUR)
                     elif dev_type == 'VirtualGrid':
                         state_logger.debug(f"Initializing VirtualGridModel for {device_key}")
                         devices_data[device_key]['model'] = VirtualGridModel(dev, devices_data, data_lock, START_HOUR)
@@ -251,7 +254,7 @@ def update_device_data():
                             new_data = dev_info['model'].update(p_command=dev_info['data'].get(14, 0))
                         elif dev_info['type'] == 'EV':
                             new_data = dev_info['model'].update(devices_data, device_key)
-                        elif dev_info['type'] in ('Load', 'JTCLoad'):
+                        elif dev_info['type'] in ('Load', 'JTCLoad', 'T7PV'):
                             new_data = dev_info['model'].update()
                         points = REGISTERS.get(dev_info['type'], {}).get('points', {})
                         for reg_name, reg_offset in points.items():
@@ -305,6 +308,8 @@ def update_device_data():
                         log_messages.append(f"Load {device_key} Power: {dev_info['data'].get(0, 0):.2f} kW")
                     elif dev_info['type'] == 'JTCLoad':
                         log_messages.append(f"JTC common load {device_key} Power: {dev_info['data'].get(0, 0):.2f} kW")
+                    elif dev_info['type'] == 'T7PV':
+                        log_messages.append(f"T7 PV {device_key} GenActivePW: {dev_info['data'].get(0, 0):.2f} kW")
                     elif dev_info['type'] == 'VirtualGrid':
                         log_messages.append(f"VirtualGrid {device_key} Incoming: {dev_info['data'].get(0, 0):.2f} kW "
                                   f"(cap {dev_info['data'].get(6, 0):.0f} kW)")

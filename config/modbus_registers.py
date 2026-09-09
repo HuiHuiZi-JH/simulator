@@ -113,6 +113,17 @@ REGISTERS = {
             "JTC.Power": "JTC common load power (landlord / common services)"
         }
     },
+    "T7PV": {
+        "base_addr": 0,
+        "points": {
+            "T7PV.GenActivePW": 0,
+            "T7PV.APProductionKWH": 2
+        },
+        "descriptions": {
+            "T7PV.GenActivePW": "Tower 7 PV generated power (outside the Tower 10 network)",
+            "T7PV.APProductionKWH": "Tower 7 PV accumulated production (kWh)"
+        }
+    },
     "VirtualGrid": {
         "base_addr": 0,
         "points": {

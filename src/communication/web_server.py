@@ -39,7 +39,8 @@ LIMIT_KEYS = {
     'VirtualGrid': ('max_import', 'bess_zero_export', 't98_loop_limit'),
 }
 
-DEVICE_TYPES = ('Meter', 'PV', 'BESS', 'EV', 'Load', 'JTCLoad', 'VirtualGrid')
+DEVICE_TYPES = ('Meter', 'PV', 'BESS', 'EV', 'Load', 'JTCLoad', 'T7PV',
+                'VirtualGrid')
 
 # Fields the config editor exposes, per device type:
 #   (json key, label, kind, required)
@@ -76,6 +77,9 @@ CONFIG_FIELDS = {
     # No base power and no synthetic mode: the JTC common load is the curve
     # the operator supplies, or nothing at all.
     'JTCLoad': [
+        ('csv_file', 'Curve file', 'text', True),
+    ],
+    'T7PV': [
         ('csv_file', 'Curve file', 'text', True),
     ],
     'VirtualGrid': [

@@ -86,6 +86,15 @@
       ]
     },
     {
+      "T7PV": [
+        {
+          "DeviceKey": "T7_PV_01",
+          "csv_file": "t7_pv_curve.csv",
+          "slave_id": 10
+        }
+      ]
+    },
+    {
       "VirtualGrid": [
         {
           "DeviceKey": "VGRID_01",
