@@ -98,8 +98,9 @@ The dashboard's **Match local time on start** checkbox toggles between the two.
 
 ## Device models
 
-Five model classes in `src/models/`. Four simulate device behaviour from config and a clock; the
-meter has no physics of its own and derives everything from the other four.
+Seven model classes in `src/models/`. Five simulate device behaviour from config and a clock; the
+meter and the virtual grid point have no physics of their own and derive everything from the
+others.
 
 | Model | Type key | Behaviour |
 |---|---|---|
@@ -107,11 +108,70 @@ meter has no physics of its own and derives everything from the other four.
 | `BatteryModel` | `BESS` | Integrates a signed power command into SOC. On hitting the SOC ceiling or floor it back-calculates the energy actually absorbed, so the kWh counters stay honest. |
 | `EVModel` | `EV` | Draws rated power inside configured charging windows (midnight-wrapping supported), capped by the written setpoint, converted to balanced three-phase currents. |
 | `LoadModel` | `Load` | Replays a demand profile interpolated from CSV at quarter-hour resolution, or jitters 80–120% of base power. |
+| `JTCLoadModel` | `JTCLoad` | The JTC common load — landlord and common services. Inherits `LoadModel` unchanged and republishes it as `JTC.Power`; the separate type is what keeps it out of the Tower 10 control loop. |
 | `MeterModel` | `Meter` | **Derived.** Sums the other devices into net power at the point of common coupling, then integrates it on a monotonic clock into separate import and export counters. |
+| `VirtualGridModel` | `VirtualGrid` | **Derived.** Sums the JTC common load and the battery into the virtual grid incoming figure the EGC regulates against, with its own import and export counters and the three static settings. |
 
 Every model exposes the same contract: a constructor taking its slice of `device.json`, and an
-`update()` returning a dict of named points. `MeterModel` additionally receives `devices_data`
-and `data_lock` because it reads the other devices.
+`update()` returning a dict of named points. `MeterModel` and `VirtualGridModel` additionally
+receive `devices_data` and `data_lock` because they read the other devices. Both are listed in
+`DERIVED_TYPES` in `main.py`, which is what makes the tick loop run them only after every physical
+device has produced this cycle's values.
+
+---
+
+## Site model — the EGC control boundary
+
+`JTC_Archi_Diagram.png` is the architecture this simulator stands in for. The site is larger than
+the part the controller owns, so the EGC is shown a *synthetic* measurement rather than the real
+incoming meter:
+
+```
+                 "Virtual" grid incoming
+        = Incoming - (T5 + T6 + T7 + Podium + Basement)
+                          |
+--------------------------+--------------------------  EGC control boundary
+   towers 5/6/7, podium and basement are pass-through and hidden from the loop
+          |                                   |
+   JTC Common Load                      Tower 10 (T98)
+   landlord / common services           whole T98 load
+                                              |  T98 LV bus
+                                       +------+------+
+                                     BESS           Solar PV
+```
+
+Two measurement points therefore exist, and they are deliberately independent:
+
+| Point | Device | Sums |
+|---|---|---|
+| Tower 10 coupling point | `Meter_01`, unit 1 | `Load` + `EV` - `PV` + `BESS` |
+| Virtual grid incoming | `VGRID_01`, unit 6 | `JTCLoad` + `BESS` |
+
+The virtual point is `JTC common load + BESS`: the JTC common load figure already contains Tower
+10's own demand, so T98 is not added a second time, and the battery is the one element under
+Tower 10 that moves the virtual import on its own. Battery charging (+) pushes the virtual import
+up, discharging (-) pulls it down.
+
+`MeterModel` only sums the types it knows — `PV`, `BESS`, `EV`, `Load` — so the JTC common load
+having its own type is what keeps it out of the Tower 10 figure. Adding the virtual point changed
+nothing about what unit 1 reports.
+
+### The three static settings
+
+The EGC regulates the virtual site with three fixed limits. The simulator publishes them as
+registers on the virtual grid device so a controller reads the limits it is meant to respect
+instead of carrying its own copy:
+
+| Setting | Register | Default |
+|---|---|---|
+| Maximum import | `VG.MaxImport` | 1,700 kW |
+| BESS zero-export threshold | `VG.BessZeroExport` | 150 kW |
+| Tower 10 loop limit | `VG.T98LoopLimit` | `0` — **not yet supplied by JTC**, set it in `device.json` when the figure is known |
+
+They are configuration, not physics: nothing in the simulator enforces them. Exceeding the import
+cap is exactly the condition a controller under test is supposed to detect and correct — with the
+shipped curve, commanding 500 kW of charge at the afternoon peak puts the virtual point at
+1,740 kW, 40 kW over the cap.
 
 ---
 
@@ -156,8 +216,11 @@ dependencies, in keeping with Rule 1's conventions.
 
 The dashboard has two tabs.
 
-**Live** shows the point of common coupling as the headline figure with a rolling sparkline, then
-a card per device with live power, state, accumulated energy, and battery SOC. The three control
+**Live** shows the Tower 10 point of common coupling as the headline figure with a rolling
+sparkline, then a card per device with live power, state, accumulated energy, and battery SOC. The
+JTC common load and the virtual grid incoming point get cards of their own; both sit outside the
+Tower 10 coupling point, so neither is counted into the headline generation and consumption
+totals. The three control
 registers get a slider and a numeric field, so curtailing the inverter or commanding the battery
 takes a drag rather than a hand-built Modbus frame.
 
@@ -292,6 +355,23 @@ Offsets are relative to base address 0 for each unit. **W** marks a control inpu
 |---|---|---|
 | 0 | `Load.Power` | Demand drawn |
 
+### JTC common load — unit 9
+
+| Addr | Point | Meaning |
+|---|---|---|
+| 0 | `JTC.Power` | Landlord / common-services demand |
+
+### Virtual grid incoming — unit 6
+
+| Addr | Point | Meaning |
+|---|---|---|
+| 0 | `VG.ActivePower` | Virtual incoming, + import / − export |
+| 2 | `VG.APConsumedKWH` | Imported energy through the virtual point |
+| 4 | `VG.APProductionKWH` | Exported energy through the virtual point |
+| 6 | `VG.MaxImport` | Static setting: maximum import |
+| 8 | `VG.BessZeroExport` | Static setting: BESS zero-export threshold |
+| 10 | `VG.T98LoopLimit` | Static setting: Tower 10 loop limit |
+
 ---
 
 ## Configuration
@@ -319,13 +399,43 @@ means adding an object, not touching code.
 `mode` is `0` for a CSV curve and `1` for synthetic generation. `DeviceKey` must be unique — it
 is the key into `devices_data`.
 
+A `JTCLoad` device takes the same fields as a `Load`. A `VirtualGrid` device takes the three
+static settings and, optionally, a `sources` list naming exactly which devices feed it:
+
+```json
+{ "VirtualGrid": [ {
+    "DeviceKey":        "VGRID_01",
+    "max_import":       1700,
+    "bess_zero_export": 150,
+    "t98_loop_limit":   0,
+    "slave_id":         6,
+    "sources": [ { "device": "JTC_COMMON_01", "sign": 1 },
+                 { "device": "BESS_01",       "sign": 1 } ]
+} ] }
+```
+
+Leave `sources` out — as the shipped config does — and every `JTCLoad` and `BESS` device
+contributes with a positive sign, which is the formula above. Set it only to depart from that,
+for instance to subtract a PV plant that the common-load figure does not already net off. A
+`sources` entry naming a device that does not exist is logged as a warning and ignored, so a
+renamed `DeviceKey` shows up in `log/simulation.log` rather than silently dropping a term.
+
 `start_time` is either `"now"` — align to local time at every start, the default — or a fixed
 `"HH:MM"`. An optional top-level `"web_port"` key moves the dashboard off its default of 8080.
 
 ### Power curves
 
-`config/pv_curve.csv` and `config/load_curve.csv` hold quarter-hour points covering 24 hours as
-`hour,kW` pairs. Values between points are linearly interpolated.
+`config/pv_curve.csv`, `config/load_curve.csv` and `config/jtc_common_curve.csv` hold quarter-hour
+points covering 24 hours as `hour,kW` pairs. Values between points are linearly interpolated.
+
+The loader discards the first row as a header. `jtc_common_curve.csv` therefore starts with a
+literal `hour,kW` line and keeps all 96 points; the two older files have no header and lose their
+midnight point — see Known issues.
+
+`jtc_common_curve.csv` is a landlord common-services day: about 530 kW overnight, ramping from
+06:00 to a 1,450 kW plateau in the early afternoon, then falling back through the evening. It is
+sized against the 1,700 kW import cap so that battery charging at the peak drives the virtual
+point over the limit.
 
 ### `config/logging_config.json`
 
@@ -347,9 +457,10 @@ When a client sees a value it did not expect, the traffic log has the bytes.
   and 70 render as `���`, and tools such as `grep` treat the file as binary and skip it. Needs
   re-encoding to UTF-8.
 - **Both CSV loaders discard the first data row.** `PVModel.load_power_curve` and
-  `LoadModel.load_power_curve` call `next(reader, None)` to skip a header, but neither CSV has
-  one — they start directly at `0.0,0.0`. Each curve therefore loads 95 points instead of 96, and
-  the midnight point is lost. Impact is small because both interpolators clamp below `times[0]`.
+  `LoadModel.load_power_curve` call `next(reader, None)` to skip a header, but `pv_curve.csv` and
+  `load_curve.csv` have none — they start directly at `0.0,0.0`. Each curve therefore loads 95
+  points instead of 96, and the midnight point is lost. Impact is small because both interpolators
+  clamp below `times[0]`. `jtc_common_curve.csv` ships with a header row and is unaffected.
 - **`config/deviceLogic.conf` is empty** and currently unread by any code.
 
 ---
@@ -363,15 +474,17 @@ config/
   modbus_registers.py            point name → register offset
   logging_config.json            log levels and files
   pv_curve.csv, load_curve.csv   24h power profiles
+  jtc_common_curve.csv           24h JTC common load profile
 src/
   communication/modbus_server.py Modbus TCP server
   communication/web_server.py    dashboard HTTP server and JSON API
-  models/                        five device models
+  models/                        seven device models
 web/
   index.html                     the dashboard UI
 utils/
   config_loader.py               JSON loader
   locks.py                       the shared data_lock
 introduction.html                illustrated overview of the system
+JTC_Archi_Diagram.png            the site architecture this simulator stands in for
 MicroGridSimulator.service       systemd unit
 ```

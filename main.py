@@ -15,6 +15,8 @@ from src.models.battery_model import BatteryModel
 from src.models.ev_model import EVModel
 from src.models.meter_model import MeterModel
 from src.models.load_model import LoadModel
+from src.models.jtc_load_model import JTCLoadModel
+from src.models.virtual_grid_model import VirtualGridModel
 from config.modbus_registers import REGISTERS
 
 # Load logging configuration
@@ -91,6 +93,9 @@ traffic_logger.propagate = False
 
 logger = logging.getLogger(__name__)
 devices_data = {}
+# Types with no physics of their own: they read the other devices, so they tick
+# only after every physical device has produced this cycle's values.
+DERIVED_TYPES = ('Meter', 'VirtualGrid')
 START_HOUR = 0.0
 modbus_server = None
 web_server = None
@@ -209,6 +214,12 @@ def load_config():
                         devices_data[device_key]['model'] = EVModel(dev, START_HOUR)
                     elif dev_type == 'Load':
                         devices_data[device_key]['model'] = LoadModel(dev, START_HOUR)
+                    elif dev_type == 'JTCLoad':
+                        devices_data[device_key]['model'] = JTCLoadModel(dev, START_HOUR)
+                    elif dev_type == 'VirtualGrid':
+                        state_logger.debug(f"Initializing VirtualGridModel for {device_key}")
+                        devices_data[device_key]['model'] = VirtualGridModel(dev, devices_data, data_lock, START_HOUR)
+                        state_logger.debug(f"VirtualGridModel initialized for {device_key}")
                     elif dev_type == 'Meter':
                         state_logger.debug(f"Initializing MeterModel for {device_key}")
                         devices_data[device_key]['model'] = MeterModel(dev, devices_data, data_lock, START_HOUR)
@@ -232,7 +243,7 @@ def update_device_data():
         try:
             state_logger.debug(f"Starting update cycle, current_hour: {current_hour:.2f} (display: {current_hour_display:.2f}), devices_data length: {len(devices_data)}")
             for device_key, dev_info in devices_data.items():
-                if dev_info['model'] and dev_info['type'] != 'Meter':
+                if dev_info['model'] and dev_info['type'] not in DERIVED_TYPES:
                     try:
                         if dev_info['type'] == 'PV':
                             new_data = dev_info['model'].update(p_limit=dev_info['data'].get(4, 0))
@@ -240,7 +251,7 @@ def update_device_data():
                             new_data = dev_info['model'].update(p_command=dev_info['data'].get(14, 0))
                         elif dev_info['type'] == 'EV':
                             new_data = dev_info['model'].update(devices_data, device_key)
-                        elif dev_info['type'] == 'Load':
+                        elif dev_info['type'] in ('Load', 'JTCLoad'):
                             new_data = dev_info['model'].update()
                         points = REGISTERS.get(dev_info['type'], {}).get('points', {})
                         for reg_name, reg_offset in points.items():
@@ -250,9 +261,9 @@ def update_device_data():
                     except Exception as e:
                         state_logger.error(f"Error updating {device_key}: {str(e)} with traceback {e.__traceback__}")
             for device_key, dev_info in devices_data.items():
-                if dev_info['type'] == 'Meter' and dev_info['model']:
+                if dev_info['type'] in DERIVED_TYPES and dev_info['model']:
                     try:
-                        state_logger.debug(f"Updating Meter {device_key}, devices_data length: {len(devices_data)}")
+                        state_logger.debug(f"Updating {dev_info['type']} {device_key}, devices_data length: {len(devices_data)}")
                         new_data = dev_info['model'].update()
                         # Publish ActivePower + the energy counters as one atomic set, so a Modbus
                         # read spanning registers 0-4 cannot mix values from two different cycles.
@@ -292,6 +303,11 @@ def update_device_data():
                         log_messages.append(f"EV {device_key} ChargePW: {dev_info['data'].get(0, 0):.2f} kW")
                     elif dev_info['type'] == 'Load':
                         log_messages.append(f"Load {device_key} Power: {dev_info['data'].get(0, 0):.2f} kW")
+                    elif dev_info['type'] == 'JTCLoad':
+                        log_messages.append(f"JTC common load {device_key} Power: {dev_info['data'].get(0, 0):.2f} kW")
+                    elif dev_info['type'] == 'VirtualGrid':
+                        log_messages.append(f"VirtualGrid {device_key} Incoming: {dev_info['data'].get(0, 0):.2f} kW "
+                                  f"(cap {dev_info['data'].get(6, 0):.0f} kW)")
                 if log_messages:
                     state_logger.info("Device States: " + " | ".join(log_messages))
                     state_logger.debug("Log messages generated: %s", log_messages)

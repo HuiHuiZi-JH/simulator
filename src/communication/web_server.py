@@ -36,9 +36,11 @@ LIMIT_KEYS = {
     'BESS': ('maxChargePower', 'maxDischargePower', 'ratedCapacity'),
     'EV': ('PUB_CONN.RatedPW', 'PUB_CONN.MinChargePW'),
     'Load': ('base_power',),
+    'JTCLoad': ('base_power',),
+    'VirtualGrid': ('max_import', 'bess_zero_export', 't98_loop_limit'),
 }
 
-DEVICE_TYPES = ('Meter', 'PV', 'BESS', 'EV', 'Load')
+DEVICE_TYPES = ('Meter', 'PV', 'BESS', 'EV', 'Load', 'JTCLoad', 'VirtualGrid')
 
 # Fields the config editor exposes, per device type:
 #   (json key, label, kind, required)
@@ -71,6 +73,16 @@ CONFIG_FIELDS = {
         ('base_power', 'Base power (kW)', 'number', True),
         ('mode', 'Source', 'mode', False),
         ('csv_file', 'Curve file', 'text', False),
+    ],
+    'JTCLoad': [
+        ('base_power', 'Base power (kW)', 'number', True),
+        ('mode', 'Source', 'mode', False),
+        ('csv_file', 'Curve file', 'text', False),
+    ],
+    'VirtualGrid': [
+        ('max_import', 'Max import (kW)', 'number', False),
+        ('bess_zero_export', 'BESS zero export (kW)', 'number', False),
+        ('t98_loop_limit', 'T98 loop limit (kW)', 'number', False),
     ],
 }
 

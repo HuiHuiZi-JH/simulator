@@ -103,5 +103,33 @@ REGISTERS = {
         "descriptions": {
             "Load.Power": "Load Power"
         }
+    },
+    "JTCLoad": {
+        "base_addr": 0,
+        "points": {
+            "JTC.Power": 0
+        },
+        "descriptions": {
+            "JTC.Power": "JTC common load power (landlord / common services)"
+        }
+    },
+    "VirtualGrid": {
+        "base_addr": 0,
+        "points": {
+            "VG.ActivePower": 0,
+            "VG.APConsumedKWH": 2,
+            "VG.APProductionKWH": 4,
+            "VG.MaxImport": 6,
+            "VG.BessZeroExport": 8,
+            "VG.T98LoopLimit": 10
+        },
+        "descriptions": {
+            "VG.ActivePower": "Virtual grid incoming (calculated), + = import, - = export",
+            "VG.APConsumedKWH": "Accumulated energy imported through the virtual point (kWh)",
+            "VG.APProductionKWH": "Accumulated energy exported through the virtual point (kWh)",
+            "VG.MaxImport": "EGC static setting: maximum import (kW)",
+            "VG.BessZeroExport": "EGC static setting: BESS zero-export threshold (kW)",
+            "VG.T98LoopLimit": "EGC static setting: Tower 10 loop limit (kW)"
+        }
     }
 }

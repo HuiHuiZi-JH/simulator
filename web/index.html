@@ -549,6 +549,23 @@
       primary: "Load.Power",
       rows: []
     },
+    JTCLoad: {
+      title: "JTC Common Load", role: "is-con",
+      primary: "JTC.Power",
+      offLoop: true,          // outside the Tower 10 control loop
+      rows: []
+    },
+    VirtualGrid: {
+      title: "Virtual Grid Incoming", role: "is-both",
+      primary: "VG.ActivePower",
+      offLoop: true,          // derived above the EGC control boundary
+      pill: { on: "exporting", draw: "importing" },
+      rows: [["Imported", "VG.APConsumedKWH", "kWh", 2],
+             ["Exported", "VG.APProductionKWH", "kWh", 2],
+             ["Max import", "VG.MaxImport", "kW", 0],
+             ["BESS zero export", "VG.BessZeroExport", "kW", 0],
+             ["T98 loop limit", "VG.T98LoopLimit", "kW", 0]]
+    },
     Meter: null   // rendered in the hero instead
   };
 
@@ -639,13 +656,16 @@
     if (Math.abs(power) < 0.005) {
       pill.className = "statepill off"; pill.textContent = "idle";
       el.className = "card is-idle";
-    } else if (dev.type === "PV" || (dev.type === "BESS" && power < 0)) {
+    } else if (dev.type === "PV" ||
+               ((dev.type === "BESS" || dev.type === "VirtualGrid") && power < 0)) {
       pill.className = "statepill on";
-      pill.textContent = dev.type === "BESS" ? "discharging" : "generating";
+      pill.textContent = (spec.pill && spec.pill.on) ||
+                         (dev.type === "BESS" ? "discharging" : "generating");
       el.className = "card is-gen";
     } else {
       pill.className = "statepill draw";
-      pill.textContent = dev.type === "BESS" ? "charging" : "drawing";
+      pill.textContent = (spec.pill && spec.pill.draw) ||
+                         (dev.type === "BESS" ? "charging" : "drawing");
       el.className = "card is-con";
     }
 
@@ -681,7 +701,9 @@
     state.devices.forEach(function (d) {
       if (d.type === "Meter") { meter = d; return; }
       var spec = SPEC[d.type];
-      if (!spec) return;
+      // offLoop devices sit outside the Tower 10 coupling point the hero
+      // summarises, so they must not move its generation/consumption totals.
+      if (!spec || spec.offLoop) return;
       var v = d.points[spec.primary] || 0;
       if (d.type === "PV") gen += v;
       else if (d.type === "BESS") { if (v < 0) gen += -v; else con += v; }
