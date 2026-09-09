@@ -80,8 +80,19 @@ setpoint written through either one lands in the same register.
 
 ### Simulated clock
 
-Time starts at `start_time` in `config/device.json` and advances with real elapsed seconds,
-wrapping at midnight. One real second is one simulated second — a full day takes a full day.
+Time advances with real elapsed seconds, wrapping at midnight. One real second is one simulated
+second — a full day takes a full day.
+
+Where it *starts* depends on `start_time` in `config/device.json`:
+
+| `start_time` | Behaviour |
+|---|---|
+| `"now"` *(default)* | The clock is set from the host's local time — hours, minutes **and seconds** — every time the simulator starts. Simulated time therefore always matches the wall clock. |
+| `"HH:MM"` | The clock always starts at that fixed hour, whatever the local time is. Use this to replay a specific part of the day. |
+
+Because configuration changes require a restart, `"now"` is the default: it means the simulated
+clock re-aligns with local time on every restart rather than jumping back to a stale fixed hour.
+The dashboard's **Match local time on start** checkbox toggles between the two.
 
 ---
 
@@ -153,6 +164,10 @@ takes a drag rather than a hand-built Modbus frame.
 **Configuration** edits `config/device.json` in a form — start time, dashboard port, and every
 device's fields, including EV charging windows. Devices can be added and removed. Saving is
 validated before anything is written, and rejected saves leave the file untouched.
+
+**Match local time on start** keeps the simulated clock aligned to this machine's local time. Leave
+it on so that every restart after a configuration change resumes at the current time; uncheck it
+only to pin the simulation to a fixed hour.
 
 Configuration changes do **not** affect the running simulation. `device.json` is read once at
 startup, so a save raises a restart banner and the new settings take effect on the next
@@ -269,7 +284,7 @@ means adding an object, not touching code.
 
 ```json
 {
-  "start_time": "14:19",
+  "start_time": "now",
   "Devices": [
     { "PV": [ {
         "DeviceKey":  "PV_01",
@@ -285,7 +300,8 @@ means adding an object, not touching code.
 `mode` is `0` for a CSV curve and `1` for synthetic generation. `DeviceKey` must be unique — it
 is the key into `devices_data`.
 
-An optional top-level `"web_port"` key moves the dashboard off its default of 8080.
+`start_time` is either `"now"` — align to local time at every start, the default — or a fixed
+`"HH:MM"`. An optional top-level `"web_port"` key moves the dashboard off its default of 8080.
 
 ### Power curves
 

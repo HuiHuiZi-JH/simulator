@@ -74,7 +74,9 @@ CONFIG_FIELDS = {
 }
 
 
-def _is_hhmm(value):
+def _is_hhmm(value, allow_now=False):
+    if allow_now and isinstance(value, str) and value.strip().lower() == 'now':
+        return True
     if not isinstance(value, str) or ':' not in value:
         return False
     hh, _, mm = value.partition(':')
@@ -90,8 +92,8 @@ def validate_config(cfg):
     if not isinstance(cfg, dict):
         return ['Configuration must be a JSON object']
 
-    if not _is_hhmm(cfg.get('start_time', '')):
-        errors.append('Start time must look like HH:MM, for example 08:30')
+    if not _is_hhmm(cfg.get('start_time', ''), allow_now=True):
+        errors.append('Start time must be "now" or look like HH:MM, for example 08:30')
 
     port = cfg.get('web_port', 8080)
     if not isinstance(port, int) or not 1 <= port <= 65535:

@@ -109,9 +109,19 @@ def load_config():
     config = load_devices_config('config/device.json')
     raw_config = config
     WEB_PORT = config.get('web_port', 8080)
-    start_time = config['start_time']
-    hh, mm = map(int, start_time.split(':'))
-    START_HOUR = hh + mm / 60.0
+    start_time = config.get('start_time', 'now')
+    if isinstance(start_time, str) and start_time.strip().lower() == 'now':
+        # Align the simulated clock to the host's local time, so every restart
+        # picks up where the wall clock actually is instead of jumping back to
+        # a fixed hour. Seconds are included so curves line up exactly.
+        local = time.localtime()
+        START_HOUR = local.tm_hour + local.tm_min / 60.0 + local.tm_sec / 3600.0
+        state_logger.info("start_time is 'now': simulation clock aligned to local time %s",
+                          time.strftime('%H:%M:%S', local))
+    else:
+        hh, mm = map(int, str(start_time).split(':'))
+        START_HOUR = hh + mm / 60.0
+        state_logger.info("start_time pinned to %02d:%02d", hh, mm)
     simulation_start_time = time.time()
     state_logger.info(f"Simulation start hour set to {START_HOUR}, start time: {time.ctime(simulation_start_time)}")
     slave_ids = set()
