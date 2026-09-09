@@ -152,6 +152,12 @@ The virtual point is `JTC common load + BESS`: the JTC common load figure alread
 Tower 10 that moves the virtual import on its own. Battery charging (+) pushes the virtual import
 up, discharging (-) pulls it down.
 
+For the same reason **the `Load` device under Tower 10 ships with an all-zero curve.** T98's
+demand is already carried by the JTC common load figure, so giving `LOAD_001` a profile of its own
+would count that demand twice. The device stays in place — it is the T98 load point, and it is
+where a real profile belongs once T98's own metering is available — but today it contributes
+nothing to either measurement.
+
 `MeterModel` only sums the types it knows — `PV`, `BESS`, `EV`, `Load` — so the JTC common load
 having its own type is what keeps it out of the Tower 10 figure. Adding the virtual point changed
 nothing about what unit 1 reports.
@@ -450,6 +456,9 @@ midnight point — see Known issues.
 sized against the 1,700 kW import cap so that battery charging at the peak drives the virtual
 point over the limit.
 
+`load_curve.csv` is all zeros, deliberately — see Site model above for why. Put a T98 profile in
+it and the Tower 10 meter picks it up on the next restart; nothing else needs changing.
+
 ### `config/logging_config.json`
 
 Three rotating log streams under `log/`, with independent levels:
@@ -471,9 +480,10 @@ When a client sees a value it did not expect, the traffic log has the bytes.
   re-encoding to UTF-8.
 - **Both CSV loaders discard the first data row.** `PVModel.load_power_curve` and
   `LoadModel.load_power_curve` call `next(reader, None)` to skip a header, but `pv_curve.csv` and
-  `load_curve.csv` have none — they start directly at `0.0,0.0`. Each curve therefore loads 95
-  points instead of 96, and the midnight point is lost. Impact is small because both interpolators
-  clamp below `times[0]`. `jtc_common_curve.csv` ships with a header row and is unaffected.
+  `load_curve.csv` have none — they start directly at `0.0,0.0`. Both files run `0.0` to `24.0`
+  inclusive, so 96 of their 97 points survive, but the one discarded is midnight. Impact is small
+  because both interpolators clamp below `times[0]`. `jtc_common_curve.csv` ships with a header
+  row and is unaffected.
 - **`config/deviceLogic.conf` is empty** and currently unread by any code.
 
 ---
