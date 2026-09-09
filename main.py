@@ -5,6 +5,7 @@ import logging
 import logging.handlers
 import json
 import os
+import sys
 from src.communication.modbus_server import ModbusServer
 from src.communication.web_server import WebServer
 from utils.config_loader import load_devices_config
@@ -96,6 +97,29 @@ web_server = None
 simulation_start_time = None
 WEB_PORT = 8080
 raw_config = {}
+
+
+def restart_process():
+    """Replace this process with a fresh one so device.json is re-read.
+
+    execv keeps the working directory and argv, so relative config paths still
+    resolve. The listening sockets are closed first and both set
+    SO_REUSEADDR, so the replacement can rebind 5021 and the web port
+    immediately. Works standalone and under systemd alike.
+    """
+    state_logger.info("Restart requested via web UI; re-executing %s %s",
+                      sys.executable, ' '.join(sys.argv))
+    for name, sock in (('modbus', getattr(modbus_server, 'sock', None)),
+                       ('web', getattr(getattr(web_server, 'httpd', None), 'socket', None))):
+        try:
+            if sock:
+                sock.close()
+                state_logger.debug("Closed %s listening socket before restart", name)
+        except Exception as e:
+            state_logger.warning("Could not close %s socket before restart: %s", name, e)
+    logging.shutdown()
+    time.sleep(0.4)
+    os.execv(sys.executable, [sys.executable] + sys.argv)
 
 
 def current_sim_hour():
@@ -289,7 +313,7 @@ def main():
     update_thread.start()
     state_logger.info("Update thread started")
     web_server = WebServer(devices_data, data_lock, current_sim_hour, WEB_PORT,
-                           raw_config)
+                           raw_config, restart_process)
     web_thread = threading.Thread(target=web_server.run, daemon=True)
     web_thread.start()
     state_logger.info("Web dashboard thread started on port %d", WEB_PORT)

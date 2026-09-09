@@ -248,6 +248,10 @@
     font-size:.84rem; font-weight:600;
   }
   .banner code { background:transparent; font-size:.82rem; }
+  .banner button {
+    border-color:var(--con); background:var(--con); color:#fff;
+    font-size:.76rem; padding:.3rem .7rem; margin-left:auto;
+  }
 
   .cfg-card {
     background:var(--surface); border:1px solid var(--line);
@@ -330,7 +334,7 @@
 
   <div class="banner" id="restart-banner" hidden>
     <span>Configuration on disk has changed &mdash; restart the simulator to apply it.</span>
-    <code>python3 main.py</code>
+    <button id="restart-btn">Restart now</button>
   </div>
 
   <div class="view" id="view-live" role="tabpanel" aria-labelledby="tab-live">
@@ -401,12 +405,15 @@
       <button class="ghost" id="cfg-add">Add device</button>
       <span style="flex:1"></span>
       <button class="ghost" id="cfg-reload">Discard changes</button>
+      <button class="ghost" id="cfg-restart">Restart simulator</button>
       <button id="cfg-save">Save to device.json</button>
     </div>
     <ul class="errors" id="cfg-errors" hidden></ul>
     <p class="hint">
       Saving rewrites <code>config/device.json</code> and keeps the previous version as
       <code>device.json.bak</code>. The running simulation is not affected until you restart it.
+      Restarting re-reads the file and resets state of charge, energy counters and the simulated
+      clock.
     </p>
   </div><!-- /view-config -->
 
@@ -716,11 +723,13 @@
         return r.json();
       })
       .then(function (state) {
+        if (restarting) return;
         failures = 0;
         setStatus(true, "live");
         render(state);
       })
-      .catch(function (e) {
+      .catch(function () {
+        if (restarting) return;
         failures++;
         setStatus(false, failures > 3 ? "disconnected" : "retrying");
       });
@@ -988,6 +997,56 @@
     cfg.Devices = rebuildDevices(list);
     renderConfig();
   });
+
+
+  /* ---------- restart ---------- */
+
+  var restarting = false;
+
+  function waitForSimulator(attempt) {
+    attempt = attempt || 0;
+    if (attempt > 40) {
+      restarting = false;
+      setStatus(false, "restart failed");
+      toast("The simulator did not come back. Check the terminal or log/simulation.log.", true);
+      return;
+    }
+    fetch("/api/state", { cache: "no-store" })
+      .then(function (r) {
+        if (!r.ok) throw new Error("not ready");
+        return r.json();
+      })
+      .then(function () {
+        restarting = false;
+        netHistory = [];
+        cfg = null;
+        toast("Simulator restarted");
+        setTimeout(function () { location.reload(); }, 400);
+      })
+      .catch(function () { setTimeout(function () { waitForSimulator(attempt + 1); }, 500); });
+  }
+
+  function restartSimulator() {
+    if (restarting) return;
+    if (!confirm("Restart the simulator?\n\nThis re-reads config/device.json and resets state of "
+               + "charge, energy counters and the simulated clock.")) return;
+    restarting = true;
+    setStatus(false, "restarting");
+    fetch("/api/restart", { method: "POST" })
+      .then(function (r) { return r.json(); })
+      .then(function (res) {
+        if (!res.ok) { restarting = false; toast(res.message || "Restart refused", true); return; }
+        toast("Restarting…");
+        setTimeout(function () { waitForSimulator(0); }, 1500);
+      })
+      .catch(function () {
+        // The connection dropping mid-restart is expected; just wait it out.
+        setTimeout(function () { waitForSimulator(0); }, 1500);
+      });
+  }
+
+  $("restart-btn").addEventListener("click", restartSimulator);
+  $("cfg-restart").addEventListener("click", restartSimulator);
 
   poll();
   setInterval(poll, POLL_MS);

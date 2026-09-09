@@ -9,6 +9,7 @@ import copy
 import json
 import logging
 import os
+import threading
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
@@ -174,7 +175,7 @@ def validate_config(cfg):
 
 class WebServer:
     def __init__(self, devices_data, data_lock, get_sim_hour, port=8080,
-                 loaded_config=None):
+                 loaded_config=None, restart_hook=None):
         self.devices_data = devices_data
         self.data_lock = data_lock
         self.get_sim_hour = get_sim_hour
@@ -183,6 +184,7 @@ class WebServer:
         # Snapshot of what the running simulation was built from, so the UI can
         # tell the operator when the file on disk has drifted ahead of it.
         self.loaded_config = copy.deepcopy(loaded_config or {})
+        self.restart_hook = restart_hook
 
     # ---------- live state ----------
 
@@ -314,6 +316,7 @@ class WebServer:
                             'schema': CONFIG_FIELDS,
                             'types': list(DEVICE_TYPES),
                             'restart_needed': server.restart_needed(),
+                            'can_restart': server.restart_hook is not None,
                         })
                     except (OSError, ValueError) as e:
                         self._json(500, {'error': 'Could not read device.json: %s' % e})
@@ -332,6 +335,21 @@ class WebServer:
                         payload.get('device'), payload.get('point'),
                         payload.get('value'))
                     self._json(200 if ok else 400, {'ok': ok, 'message': message})
+
+                elif self.path.startswith('/api/restart'):
+                    if server.restart_hook is None:
+                        self._json(503, {'ok': False,
+                                         'message': 'Restart is not available'})
+                        return
+                    # Answer first, then re-exec, so the browser sees the reply
+                    # rather than a dropped connection.
+                    self._json(200, {'ok': True, 'message': 'Restarting the simulator...'})
+                    try:
+                        self.wfile.flush()
+                    except OSError:
+                        pass
+                    logger.info('Restart requested from %s', self.address_string())
+                    threading.Timer(0.5, server.restart_hook).start()
 
                 elif self.path.startswith('/api/config'):
                     try:

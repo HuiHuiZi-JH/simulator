@@ -169,9 +169,12 @@ validated before anything is written, and rejected saves leave the file untouche
 it on so that every restart after a configuration change resumes at the current time; uncheck it
 only to pin the simulation to a fixed hour.
 
-Configuration changes do **not** affect the running simulation. `device.json` is read once at
-startup, so a save raises a restart banner and the new settings take effect on the next
-`python3 main.py`. Restarting also resets SOC, energy counters, and the simulated clock.
+Configuration changes do **not** affect the running simulation — `device.json` is read once at
+startup. Saving raises a restart banner with a **Restart now** button, so the round trip stays in
+the browser; there is also a **Restart simulator** button in the configuration actions.
+
+Restarting re-reads `device.json` and resets SOC, energy counters, and the simulated clock. With
+`start_time: "now"` the clock comes back aligned to local time.
 
 ### API
 
@@ -182,6 +185,7 @@ startup, so a save raises a restart banner and the new settings take effect on t
 | `POST` | `/api/control` | Write one control register |
 | `GET` | `/api/config` | Current `device.json`, the editable field schema, and the restart flag |
 | `POST` | `/api/config` | Validate and write `device.json` |
+| `POST` | `/api/restart` | Restart the simulator in place |
 
 ```
 curl -X POST http://localhost:8080/api/control \
@@ -191,6 +195,21 @@ curl -X POST http://localhost:8080/api/control \
 
 Writes are refused unless the point is one of the three control registers listed above —
 everything else is an output the next tick would overwrite, so accepting it would be misleading.
+
+### How restart works
+
+`POST /api/restart` answers first, then re-executes the process with `os.execv`, replacing the
+running image with a fresh `python3 main.py`. The listening sockets are closed beforehand and both
+set `SO_REUSEADDR`, so ports 5021 and 8080 rebind immediately.
+
+Because `execv` keeps the working directory, argv, and PID, this behaves the same whether the
+simulator was started by hand or by systemd — systemd sees a continuously running process rather
+than a failure, so `Restart=always` is not involved.
+
+The browser polls `/api/state` until it answers again, then reloads. If the replacement process
+cannot start, nothing is listening and the UI reports the failure after about 20 seconds — check
+`log/simulation.log`. This is why `POST /api/config` validates before writing: a config that fails
+validation can never reach the file, so a restart cannot be wedged by a bad save.
 
 ### Editing configuration safely
 
