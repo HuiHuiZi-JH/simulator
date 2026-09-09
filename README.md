@@ -46,7 +46,14 @@ Start from the repository root so the relative config paths resolve:
 python3 main.py
 ```
 
-The server listens on `0.0.0.0:5021`. Point any Modbus TCP client at it.
+Two servers come up:
+
+| Interface | Address | Purpose |
+|---|---|---|
+| Modbus TCP | `0.0.0.0:5021` | Machine interface for an EMS or controller |
+| Web dashboard | `http://localhost:8080` | Human interface — live state and setpoints |
+
+Point any Modbus TCP client at 5021, or open the dashboard in a browser.
 
 To read the meter: unit 1, address 0, quantity 2 returns net active power as a signed 32-bit
 integer — divide by 100 for kW. Positive means the site is importing from the grid, negative
@@ -59,15 +66,17 @@ install it with systemd. It restarts on failure and routes output to syslog.
 
 ## Architecture
 
-`main.py` starts two threads over a single `devices_data` dictionary guarded by one lock:
+`main.py` starts three threads over a single `devices_data` dictionary guarded by one lock:
 
 - **Simulation thread** (`update_device_data`) — ticks every device model once a second and writes
   the results into each device's register table.
-- **Server thread** (`ModbusServer.run`) — answers Modbus requests out of that same table, one
+- **Modbus thread** (`ModbusServer.run`) — answers Modbus requests out of that same table, one
   daemon thread per client connection.
+- **Web thread** (`WebServer.run`) — serves the dashboard and its JSON API from the same table.
 
-Because both sides take the lock, a client always reads a coherent snapshot, and anything it
-writes becomes an input to the next tick.
+Every reader and writer takes the lock, so a client always sees a coherent snapshot, and anything
+written becomes an input to the next tick. The Modbus and web interfaces are equivalent: a
+setpoint written through either one lands in the same register.
 
 ### Simulated clock
 
@@ -126,6 +135,38 @@ than replaying data.
 
 Function code 16 will accept a write to any even offset, but only these three are consumed by the
 models. The rest are overwritten on the next tick.
+
+---
+
+## Web dashboard
+
+A browser UI served by the simulator itself on port 8080, built on `http.server` — no
+dependencies, in keeping with Rule 1's conventions.
+
+It shows the point of common coupling as the headline figure with a rolling sparkline, then a card
+per device with live power, state, accumulated energy, and battery SOC. The three control
+registers get a slider and a numeric field, so curtailing the inverter or commanding the battery
+takes a drag rather than a hand-built Modbus frame.
+
+### API
+
+| Method | Path | Purpose |
+|---|---|---|
+| `GET` | `/` | The dashboard page (`web/index.html`) |
+| `GET` | `/api/state` | JSON snapshot: every device, its named points, config limits |
+| `POST` | `/api/control` | Write one control register |
+
+```
+curl -X POST http://localhost:8080/api/control \
+  -H 'Content-Type: application/json' \
+  -d '{"device":"PV_01","point":"INV.LimitPower","value":30}'
+```
+
+Writes are refused unless the point is one of the three control registers listed above —
+everything else is an output the next tick would overwrite, so accepting it would be misleading.
+
+The dashboard polls `/api/state` once a second. It is not authenticated and binds `0.0.0.0`; keep
+it on a trusted network or change the bind address before exposing it.
 
 ---
 
@@ -220,6 +261,8 @@ means adding an object, not touching code.
 `mode` is `0` for a CSV curve and `1` for synthetic generation. `DeviceKey` must be unique — it
 is the key into `devices_data`.
 
+An optional top-level `"web_port"` key moves the dashboard off its default of 8080.
+
 ### Power curves
 
 `config/pv_curve.csv` and `config/load_curve.csv` hold quarter-hour points covering 24 hours as
@@ -263,7 +306,10 @@ config/
   pv_curve.csv, load_curve.csv   24h power profiles
 src/
   communication/modbus_server.py Modbus TCP server
+  communication/web_server.py    dashboard HTTP server and JSON API
   models/                        five device models
+web/
+  index.html                     the dashboard UI
 utils/
   config_loader.py               JSON loader
   locks.py                       the shared data_lock

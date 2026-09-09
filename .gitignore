@@ -21,3 +21,6 @@ dist/
 .DS_Store
 *.swp
 .idea/
+
+# Runtime logs
+log/

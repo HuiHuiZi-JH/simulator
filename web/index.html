@@ -1,0 +1,610 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>MicroGrid Simulator — Live</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap">
+<style>
+  :root {
+    --ground:#EDF0F2; --surface:#FFFFFF; --sunken:#E3E8EB;
+    --ink:#131C24; --muted:#566673; --faint:#7C8A95;
+    --line:#D2DADF; --hairline:#E1E7EA;
+    --accent:#0E6E7D; --accent-soft:#D8ECEF;
+    --gen:#2C7F60; --gen-soft:#DCEDE5;
+    --con:#B04E2A; --con-soft:#F5E3DA;
+    --warn:#B4780E;
+    --shadow:0 1px 2px rgba(19,28,36,.06), 0 8px 24px -14px rgba(19,28,36,.2);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --ground:#0F151A; --surface:#161F26; --sunken:#121A20;
+      --ink:#E2EAEF; --muted:#93A5B1; --faint:#758794;
+      --line:#2A363F; --hairline:#222D35;
+      --accent:#46B4C6; --accent-soft:#16323A;
+      --gen:#56BE92; --gen-soft:#173428;
+      --con:#E28A63; --con-soft:#372218;
+      --warn:#D9A441;
+      --shadow:0 1px 2px rgba(0,0,0,.4), 0 8px 24px -14px rgba(0,0,0,.7);
+    }
+  }
+  :root[data-theme="dark"] {
+    --ground:#0F151A; --surface:#161F26; --sunken:#121A20;
+    --ink:#E2EAEF; --muted:#93A5B1; --faint:#758794;
+    --line:#2A363F; --hairline:#222D35;
+    --accent:#46B4C6; --accent-soft:#16323A;
+    --gen:#56BE92; --gen-soft:#173428;
+    --con:#E28A63; --con-soft:#372218;
+    --warn:#D9A441;
+    --shadow:0 1px 2px rgba(0,0,0,.4), 0 8px 24px -14px rgba(0,0,0,.7);
+  }
+
+  * { box-sizing:border-box; }
+  body {
+    margin:0; background:var(--ground); color:var(--ink);
+    font-family:Archivo,"Helvetica Neue",Arial,sans-serif;
+    font-size:15px; line-height:1.5; -webkit-font-smoothing:antialiased;
+  }
+  .mono, code { font-family:"IBM Plex Mono",ui-monospace,Menlo,monospace; font-variant-ligatures:none; }
+  .num { font-variant-numeric:tabular-nums; }
+
+  .wrap { max-width:1180px; margin:0 auto; padding:0 clamp(1rem,3vw,2rem); }
+
+  /* ---- top bar ---- */
+  .topbar {
+    position:sticky; top:0; z-index:20;
+    background:color-mix(in srgb, var(--ground) 88%, transparent);
+    backdrop-filter:blur(8px);
+    border-bottom:1px solid var(--hairline);
+  }
+  .topbar-in {
+    display:flex; align-items:center; gap:1rem; flex-wrap:wrap;
+    padding-block:.85rem;
+  }
+  .brand { font-weight:700; letter-spacing:-.02em; font-size:1.05rem; margin-right:auto; }
+  .brand span { color:var(--faint); font-weight:500; }
+
+  .status {
+    display:inline-flex; align-items:center; gap:.45rem;
+    font-family:"IBM Plex Mono",monospace; font-size:.72rem;
+    letter-spacing:.06em; text-transform:uppercase;
+    padding:.3rem .65rem; border-radius:999px;
+    border:1px solid transparent;
+  }
+  .status .dot { width:.45rem; height:.45rem; border-radius:50%; flex:none; }
+  .status.live  { color:var(--gen); background:var(--gen-soft); border-color:color-mix(in srgb,var(--gen) 30%,transparent); }
+  .status.live .dot { background:var(--gen); }
+  .status.down  { color:var(--con); background:var(--con-soft); border-color:color-mix(in srgb,var(--con) 30%,transparent); }
+  .status.down .dot { background:var(--con); }
+  @media (prefers-reduced-motion:no-preference) {
+    .status.live .dot { animation:pulse 2s ease-in-out infinite; }
+    @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.35} }
+  }
+
+  .clock {
+    font-family:"IBM Plex Mono",monospace; font-size:.82rem;
+    color:var(--muted); font-variant-numeric:tabular-nums;
+  }
+  .clock b { color:var(--ink); font-weight:600; }
+
+  /* ---- meter hero ---- */
+  .hero {
+    margin-top:clamp(1.25rem,3vw,2rem);
+    background:var(--surface); border:1px solid var(--line);
+    border-radius:12px; box-shadow:var(--shadow); overflow:hidden;
+  }
+  .hero-grid { display:grid; grid-template-columns:minmax(0,1.35fr) minmax(0,1fr); }
+  @media (max-width:760px){ .hero-grid { grid-template-columns:1fr; } }
+
+  .hero-main { padding:clamp(1.25rem,3vw,1.9rem); }
+  .hero-side {
+    padding:clamp(1.25rem,3vw,1.9rem);
+    border-left:1px solid var(--hairline);
+    display:flex; flex-direction:column; gap:1.1rem; justify-content:center;
+  }
+  @media (max-width:760px){ .hero-side { border-left:none; border-top:1px solid var(--hairline); } }
+
+  .label {
+    font-family:"IBM Plex Mono",monospace; font-size:.68rem; font-weight:500;
+    letter-spacing:.13em; text-transform:uppercase; color:var(--faint);
+    margin:0 0 .5rem;
+  }
+
+  .bignum {
+    display:flex; align-items:baseline; gap:.5rem;
+    font-size:clamp(2.6rem,7vw,3.9rem); font-weight:700;
+    letter-spacing:-.035em; line-height:1; margin:0;
+    font-variant-numeric:tabular-nums;
+  }
+  .bignum .unit { font-size:.28em; font-weight:600; color:var(--faint); letter-spacing:0; }
+
+  .flowpill {
+    display:inline-flex; align-items:center; gap:.4rem; margin-top:.9rem;
+    font-size:.78rem; font-weight:600; letter-spacing:.02em;
+    padding:.32rem .7rem; border-radius:999px;
+  }
+  .flowpill.import { color:var(--con); background:var(--con-soft); }
+  .flowpill.export { color:var(--gen); background:var(--gen-soft); }
+  .flowpill.idle   { color:var(--faint); background:var(--sunken); }
+
+  .spark { margin-top:1.1rem; width:100%; height:64px; display:block; }
+
+  .kv { display:flex; align-items:baseline; justify-content:space-between; gap:1rem; }
+  .kv dt { font-size:.78rem; color:var(--muted); }
+  .kv dd {
+    margin:0; font-family:"IBM Plex Mono",monospace; font-size:1rem;
+    font-weight:500; font-variant-numeric:tabular-nums;
+  }
+  .kv dd.gen { color:var(--gen); }
+  .kv dd.con { color:var(--con); }
+
+  /* ---- device grid ---- */
+  h2 {
+    font-size:.72rem; font-weight:600; letter-spacing:.14em;
+    text-transform:uppercase; color:var(--faint);
+    margin:clamp(2rem,4vw,2.8rem) 0 .9rem;
+  }
+  .grid {
+    display:grid; gap:1rem;
+    grid-template-columns:repeat(auto-fit,minmax(16.5rem,1fr));
+  }
+  .card {
+    background:var(--surface); border:1px solid var(--line);
+    border-radius:10px; padding:1.15rem 1.2rem 1.25rem;
+    display:flex; flex-direction:column; gap:.7rem;
+    border-top:3px solid var(--line);
+  }
+  .card.is-gen  { border-top-color:var(--gen); }
+  .card.is-con  { border-top-color:var(--con); }
+  .card.is-both { border-top-color:var(--accent); }
+  .card.is-idle { border-top-color:var(--line); }
+
+  .card-head { display:flex; align-items:baseline; justify-content:space-between; gap:.6rem; }
+  .card-head h3 { margin:0; font-size:.98rem; font-weight:600; letter-spacing:-.01em; }
+  .unit-id { font-family:"IBM Plex Mono",monospace; font-size:.7rem; color:var(--faint); }
+
+  .card .primary {
+    font-size:1.9rem; font-weight:700; letter-spacing:-.03em; line-height:1;
+    font-variant-numeric:tabular-nums; display:flex; align-items:baseline; gap:.35rem;
+  }
+  .card .primary .unit { font-size:.42em; font-weight:600; color:var(--faint); }
+
+  .statepill {
+    display:inline-block; font-family:"IBM Plex Mono",monospace;
+    font-size:.63rem; font-weight:500; letter-spacing:.09em; text-transform:uppercase;
+    padding:.16rem .45rem; border-radius:3px;
+  }
+  .statepill.on   { color:var(--gen); background:var(--gen-soft); }
+  .statepill.off  { color:var(--faint); background:var(--sunken); }
+  .statepill.draw { color:var(--con); background:var(--con-soft); }
+
+  .bar { height:6px; border-radius:3px; background:var(--sunken); overflow:hidden; }
+  .bar > i { display:block; height:100%; background:var(--accent); border-radius:3px; transition:width .4s ease; }
+  @media (prefers-reduced-motion:reduce){ .bar > i { transition:none; } }
+
+  .rows {
+    margin:0; display:grid; grid-template-columns:auto 1fr; gap:.28rem .8rem;
+    border-top:1px solid var(--hairline); padding-top:.7rem;
+    font-family:"IBM Plex Mono",monospace; font-size:.735rem;
+  }
+  .rows dt { color:var(--faint); }
+  .rows dd { margin:0; text-align:right; font-variant-numeric:tabular-nums; }
+
+  /* ---- controls ---- */
+  .ctl { display:flex; flex-direction:column; gap:.5rem; border-top:1px solid var(--hairline); padding-top:.85rem; }
+  .ctl-label {
+    display:flex; align-items:baseline; justify-content:space-between; gap:.5rem;
+    font-family:"IBM Plex Mono",monospace; font-size:.7rem; color:var(--faint);
+  }
+  .ctl-label b { color:var(--accent); font-weight:600; font-size:.85rem; font-variant-numeric:tabular-nums; }
+  .ctl-row { display:flex; gap:.5rem; align-items:center; }
+
+  input[type=range] { flex:1; accent-color:var(--accent); min-width:0; height:1.5rem; }
+  input[type=number] {
+    width:5.2rem; font-family:"IBM Plex Mono",monospace; font-size:.8rem;
+    padding:.34rem .45rem; border-radius:5px;
+    border:1px solid var(--line); background:var(--sunken); color:var(--ink);
+    font-variant-numeric:tabular-nums;
+  }
+  button {
+    font-family:Archivo,Arial,sans-serif; font-size:.78rem; font-weight:600;
+    padding:.4rem .8rem; border-radius:5px; cursor:pointer;
+    border:1px solid var(--accent); background:var(--accent); color:var(--surface);
+  }
+  button:hover { opacity:.88; }
+  button:active { transform:translateY(1px); }
+  button.ghost { background:transparent; color:var(--accent); }
+  :is(button,input,a):focus-visible { outline:2px solid var(--accent); outline-offset:2px; }
+
+  .toast {
+    position:fixed; left:50%; bottom:1.5rem; transform:translateX(-50%);
+    background:var(--ink); color:var(--ground);
+    font-size:.82rem; padding:.55rem 1rem; border-radius:6px;
+    box-shadow:var(--shadow); opacity:0; pointer-events:none;
+    transition:opacity .2s ease; z-index:50; max-width:90vw;
+  }
+  .toast.show { opacity:1; }
+  .toast.err { background:var(--con); color:#fff; }
+
+  .empty {
+    padding:2.5rem 1rem; text-align:center; color:var(--faint);
+    border:1px dashed var(--line); border-radius:10px; font-size:.9rem;
+  }
+  footer {
+    margin-top:clamp(2rem,5vw,3.5rem); padding-block:1.5rem 2.5rem;
+    border-top:1px solid var(--hairline); color:var(--faint); font-size:.76rem;
+  }
+</style>
+</head>
+<body>
+
+<div class="topbar">
+  <div class="wrap topbar-in">
+    <div class="brand">MicroGrid <span>Simulator</span></div>
+    <div class="clock">sim <b id="simclock">--:--</b></div>
+    <div class="clock">host <b id="wallclock">--:--:--</b></div>
+    <div class="status down" id="status"><span class="dot"></span><span id="statustext">connecting</span></div>
+  </div>
+</div>
+
+<main class="wrap">
+
+  <section class="hero" aria-labelledby="pcc-label">
+    <div class="hero-grid">
+      <div class="hero-main">
+        <p class="label" id="pcc-label">Point of common coupling</p>
+        <p class="bignum"><span id="net">—</span><span class="unit">kW</span></p>
+        <span class="flowpill idle" id="flow">waiting for data</span>
+        <svg class="spark" id="spark" viewBox="0 0 600 64" preserveAspectRatio="none" aria-hidden="true"></svg>
+      </div>
+      <div class="hero-side">
+        <div>
+          <p class="label">Energy today</p>
+          <dl class="kv" style="margin:0 0 .5rem">
+            <dt>Imported from grid</dt><dd class="con num" id="e-import">—</dd>
+          </dl>
+          <dl class="kv" style="margin:0">
+            <dt>Exported to grid</dt><dd class="gen num" id="e-export">—</dd>
+          </dl>
+        </div>
+        <div>
+          <p class="label">Right now</p>
+          <dl class="kv" style="margin:0 0 .5rem">
+            <dt>Generating</dt><dd class="gen num" id="p-gen">—</dd>
+          </dl>
+          <dl class="kv" style="margin:0">
+            <dt>Consuming</dt><dd class="con num" id="p-con">—</dd>
+          </dl>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <h2>Devices</h2>
+  <div class="grid" id="devices">
+    <div class="empty">Waiting for the simulator…</div>
+  </div>
+
+  <footer>
+    Reads and writes go through the same <code class="mono">devices_data</code> table as the Modbus
+    server on port 5021. A setpoint written here is identical to a function-code-16 write.
+  </footer>
+</main>
+
+<div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+<script>
+(function () {
+  "use strict";
+
+  var POLL_MS = 1000;
+  var HISTORY = 120;
+  var netHistory = [];
+  var pending = {};      // device|point -> true while the user is dragging
+  var failures = 0;
+
+  var $ = function (id) { return document.getElementById(id); };
+
+  function fmt(n, dp) {
+    if (n === null || n === undefined || isNaN(n)) return "—";
+    return Number(n).toFixed(dp === undefined ? 1 : dp);
+  }
+
+  function toast(msg, isErr) {
+    var t = $("toast");
+    t.textContent = msg;
+    t.className = "toast show" + (isErr ? " err" : "");
+    clearTimeout(t._timer);
+    t._timer = setTimeout(function () { t.className = "toast"; }, 2600);
+  }
+
+  function setStatus(live, text) {
+    var el = $("status");
+    el.className = "status " + (live ? "live" : "down");
+    $("statustext").textContent = text;
+  }
+
+  function hourToClock(h) {
+    if (h === null || h === undefined) return "--:--";
+    var hh = Math.floor(h) % 24;
+    var mm = Math.floor((h - Math.floor(h)) * 60);
+    return String(hh).padStart(2, "0") + ":" + String(mm).padStart(2, "0");
+  }
+
+  /* ---------- sparkline ---------- */
+
+  function drawSpark() {
+    var svg = $("spark");
+    while (svg.firstChild) svg.removeChild(svg.firstChild);
+    if (netHistory.length < 2) return;
+
+    var W = 600, H = 64, pad = 4;
+    var max = Math.max.apply(null, netHistory);
+    var min = Math.min.apply(null, netHistory);
+    var span = Math.max(Math.abs(max), Math.abs(min), 1);
+    var lo = -span, hi = span;
+
+    var x = function (i) { return (i / (netHistory.length - 1)) * W; };
+    var y = function (v) { return pad + (1 - (v - lo) / (hi - lo)) * (H - pad * 2); };
+
+    var ns = "http://www.w3.org/2000/svg";
+    var zero = document.createElementNS(ns, "line");
+    zero.setAttribute("x1", 0); zero.setAttribute("x2", W);
+    zero.setAttribute("y1", y(0)); zero.setAttribute("y2", y(0));
+    zero.setAttribute("stroke", "var(--hairline)");
+    zero.setAttribute("stroke-width", "1");
+    svg.appendChild(zero);
+
+    var last = netHistory[netHistory.length - 1];
+    var stroke = last > 0.01 ? "var(--con)" : (last < -0.01 ? "var(--gen)" : "var(--faint)");
+
+    var d = netHistory.map(function (v, i) {
+      return (i ? "L" : "M") + x(i).toFixed(1) + "," + y(v).toFixed(1);
+    }).join(" ");
+
+    var area = document.createElementNS(ns, "path");
+    area.setAttribute("d", d + " L" + W + "," + y(0) + " L0," + y(0) + " Z");
+    area.setAttribute("fill", stroke);
+    area.setAttribute("opacity", ".10");
+    svg.appendChild(area);
+
+    var line = document.createElementNS(ns, "path");
+    line.setAttribute("d", d);
+    line.setAttribute("fill", "none");
+    line.setAttribute("stroke", stroke);
+    line.setAttribute("stroke-width", "2");
+    line.setAttribute("stroke-linejoin", "round");
+    svg.appendChild(line);
+
+    var dot = document.createElementNS(ns, "circle");
+    dot.setAttribute("cx", W); dot.setAttribute("cy", y(last));
+    dot.setAttribute("r", "3"); dot.setAttribute("fill", stroke);
+    svg.appendChild(dot);
+  }
+
+  /* ---------- device rendering ---------- */
+
+  var SPEC = {
+    PV: {
+      title: "PV Inverter", role: "is-gen",
+      primary: "INV.GenActivePW",
+      rows: [["Produced", "INV.APProductionKWH", "kWh", 2],
+             ["Limit", "INV.LimitPower", "kW", 1]],
+      control: { point: "INV.LimitPower", label: "Power limit",
+                 min: 0, maxFrom: "ratedPower", fallbackMax: 100 }
+    },
+    BESS: {
+      title: "Battery", role: "is-both",
+      primary: "BS.ActivePW",
+      soc: "BS.Soc",
+      rows: [["Charged", "BS.TotalChargingEng", "kWh", 2],
+             ["Discharged", "BS.TotalDischargingEng", "kWh", 2],
+             ["Health", "BS.Soh", "%", 0]],
+      control: { point: "BS.SysAPSetPoint", label: "Power command",
+                 minFrom: "maxDischargePower", maxFrom: "maxChargePower",
+                 fallbackMax: 100, signed: true }
+    },
+    EV: {
+      title: "EV Charger", role: "is-con",
+      primary: "PUB_CONN.ChargePW",
+      rows: [["Session", "PUB_CONN.ChargeEnergyKWH", "kWh", 2],
+             ["Current L1", "PUB_CONN.CurrentL1", "A", 1]],
+      control: { point: "PUB_CONN.ChargePWSet", label: "Charge setpoint",
+                 min: 0, maxFrom: "PUB_CONN.RatedPW", fallbackMax: 50 }
+    },
+    Load: {
+      title: "Building Load", role: "is-con",
+      primary: "Load.Power",
+      rows: []
+    },
+    Meter: null   // rendered in the hero instead
+  };
+
+  function cardId(key) { return "dev-" + key.replace(/[^A-Za-z0-9_-]/g, "_"); }
+
+  function buildCard(dev) {
+    var spec = SPEC[dev.type];
+    var el = document.createElement("article");
+    el.className = "card " + spec.role;
+    el.id = cardId(dev.key);
+
+    var html =
+      '<div class="card-head"><h3>' + spec.title + '</h3>' +
+      '<span class="unit-id">' + dev.key + ' · unit ' + dev.slave_id + '</span></div>' +
+      '<div class="primary"><span data-f="primary">—</span><span class="unit">kW</span></div>' +
+      '<div><span class="statepill off" data-f="state">idle</span></div>';
+
+    if (spec.soc) {
+      html += '<div><div class="ctl-label" style="margin-bottom:.3rem">' +
+              '<span>State of charge</span><b data-f="soctext">—</b></div>' +
+              '<div class="bar"><i data-f="socbar" style="width:0%"></i></div></div>';
+    }
+
+    if (spec.rows.length) {
+      html += '<dl class="rows">';
+      spec.rows.forEach(function (r, i) {
+        html += '<dt>' + r[0] + '</dt><dd data-row="' + i + '">—</dd>';
+      });
+      html += '</dl>';
+    }
+
+    if (spec.control) {
+      var c = spec.control;
+      var max = (c.maxFrom && dev.limits[c.maxFrom]) || c.fallbackMax;
+      var min = c.signed ? -((c.minFrom && dev.limits[c.minFrom]) || max) : (c.min || 0);
+      html +=
+        '<div class="ctl">' +
+          '<div class="ctl-label"><span>' + c.label + '</span>' +
+          '<b data-f="ctlval">—</b></div>' +
+          '<div class="ctl-row">' +
+            '<input type="range" data-ctl="range" min="' + min + '" max="' + max +
+              '" step="0.5" value="0" aria-label="' + c.label + ' for ' + dev.key + '">' +
+            '<input type="number" data-ctl="num" min="' + min + '" max="' + max +
+              '" step="0.5" value="0" aria-label="' + c.label + ' value for ' + dev.key + '">' +
+            '<button data-ctl="apply">Set</button>' +
+          '</div>' +
+        '</div>';
+    }
+
+    el.innerHTML = html;
+
+    if (spec.control) {
+      var range = el.querySelector('[data-ctl="range"]');
+      var num = el.querySelector('[data-ctl="num"]');
+      var apply = el.querySelector('[data-ctl="apply"]');
+      var pkey = dev.key + "|" + spec.control.point;
+
+      var touch = function () { pending[pkey] = true; };
+      range.addEventListener("input", function () { touch(); num.value = range.value; });
+      num.addEventListener("input", function () { touch(); range.value = num.value; });
+
+      apply.addEventListener("click", function () {
+        var v = parseFloat(num.value);
+        if (isNaN(v)) { toast("Enter a number first", true); return; }
+        fetch("/api/control", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ device: dev.key, point: spec.control.point, value: v })
+        }).then(function (r) { return r.json(); }).then(function (res) {
+          toast(res.message || (res.ok ? "Applied" : "Rejected"), !res.ok);
+          delete pending[pkey];
+        }).catch(function (e) {
+          toast("Could not reach the simulator: " + e.message, true);
+        });
+      });
+    }
+    return el;
+  }
+
+  function updateCard(el, dev) {
+    var spec = SPEC[dev.type];
+    var p = dev.points;
+    var power = p[spec.primary] || 0;
+
+    el.querySelector('[data-f="primary"]').textContent = fmt(power);
+
+    var pill = el.querySelector('[data-f="state"]');
+    if (Math.abs(power) < 0.005) {
+      pill.className = "statepill off"; pill.textContent = "idle";
+      el.className = "card is-idle";
+    } else if (dev.type === "PV" || (dev.type === "BESS" && power < 0)) {
+      pill.className = "statepill on";
+      pill.textContent = dev.type === "BESS" ? "discharging" : "generating";
+      el.className = "card is-gen";
+    } else {
+      pill.className = "statepill draw";
+      pill.textContent = dev.type === "BESS" ? "charging" : "drawing";
+      el.className = "card is-con";
+    }
+
+    if (spec.soc) {
+      var soc = p[spec.soc] || 0;
+      el.querySelector('[data-f="soctext"]').textContent = fmt(soc) + "%";
+      el.querySelector('[data-f="socbar"]').style.width = Math.max(0, Math.min(100, soc)) + "%";
+    }
+
+    spec.rows.forEach(function (r, i) {
+      var cell = el.querySelector('[data-row="' + i + '"]');
+      if (cell) cell.textContent = fmt(p[r[1]], r[3]) + " " + r[2];
+    });
+
+    if (spec.control) {
+      var live = p[spec.control.point] || 0;
+      el.querySelector('[data-f="ctlval"]').textContent = fmt(live) + " kW";
+      if (!pending[dev.key + "|" + spec.control.point]) {
+        el.querySelector('[data-ctl="range"]').value = live;
+        el.querySelector('[data-ctl="num"]').value = fmt(live);
+      }
+    }
+  }
+
+  /* ---------- poll ---------- */
+
+  function render(state) {
+    $("simclock").textContent = hourToClock(state.sim_hour);
+    $("wallclock").textContent = state.wall_time;
+
+    var meter = null, gen = 0, con = 0;
+    state.devices.forEach(function (d) {
+      if (d.type === "Meter") { meter = d; return; }
+      var spec = SPEC[d.type];
+      if (!spec) return;
+      var v = d.points[spec.primary] || 0;
+      if (d.type === "PV") gen += v;
+      else if (d.type === "BESS") { if (v < 0) gen += -v; else con += v; }
+      else con += v;
+    });
+
+    if (meter) {
+      var net = meter.points["ActivePower"] || 0;
+      $("net").textContent = fmt(net, 2);
+      var flow = $("flow");
+      if (net > 0.01) { flow.className = "flowpill import"; flow.textContent = "Importing from grid"; }
+      else if (net < -0.01) { flow.className = "flowpill export"; flow.textContent = "Exporting to grid"; }
+      else { flow.className = "flowpill idle"; flow.textContent = "Balanced"; }
+
+      $("e-import").textContent = fmt(meter.points["APConsumedKWH"], 3) + " kWh";
+      $("e-export").textContent = fmt(meter.points["APProductionKWH"], 3) + " kWh";
+
+      netHistory.push(net);
+      if (netHistory.length > HISTORY) netHistory.shift();
+      drawSpark();
+    }
+    $("p-gen").textContent = fmt(gen) + " kW";
+    $("p-con").textContent = fmt(con) + " kW";
+
+    var host = $("devices");
+    if (host.querySelector(".empty")) host.innerHTML = "";
+    state.devices.forEach(function (d) {
+      if (!SPEC[d.type]) return;
+      var el = document.getElementById(cardId(d.key));
+      if (!el) { el = buildCard(d); host.appendChild(el); }
+      updateCard(el, d);
+    });
+  }
+
+  function poll() {
+    fetch("/api/state", { cache: "no-store" })
+      .then(function (r) {
+        if (!r.ok) throw new Error("HTTP " + r.status);
+        return r.json();
+      })
+      .then(function (state) {
+        failures = 0;
+        setStatus(true, "live");
+        render(state);
+      })
+      .catch(function (e) {
+        failures++;
+        setStatus(false, failures > 3 ? "disconnected" : "retrying");
+      });
+  }
+
+  poll();
+  setInterval(poll, POLL_MS);
+})();
+</script>
+</body>
+</html>

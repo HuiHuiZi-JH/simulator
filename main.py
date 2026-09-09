@@ -6,6 +6,7 @@ import logging.handlers
 import json
 import os
 from src.communication.modbus_server import ModbusServer
+from src.communication.web_server import WebServer
 from utils.config_loader import load_devices_config
 from utils.locks import data_lock
 from src.models.pv_model import PVModel
@@ -91,11 +92,21 @@ logger = logging.getLogger(__name__)
 devices_data = {}
 START_HOUR = 0.0
 modbus_server = None
+web_server = None
 simulation_start_time = None
+WEB_PORT = 8080
+
+
+def current_sim_hour():
+    """Simulated hour of day, wrapping at midnight."""
+    if simulation_start_time is None:
+        return START_HOUR % 24
+    return (START_HOUR + (time.time() - simulation_start_time) / 3600) % 24
 
 def load_config():
-    global devices_data, START_HOUR, simulation_start_time
+    global devices_data, START_HOUR, simulation_start_time, WEB_PORT
     config = load_devices_config('config/device.json')
+    WEB_PORT = config.get('web_port', 8080)
     start_time = config['start_time']
     hh, mm = map(int, start_time.split(':'))
     START_HOUR = hh + mm / 60.0
@@ -252,7 +263,7 @@ def update_device_data():
         time.sleep(1.0)
 
 def main():
-    global modbus_server
+    global modbus_server, web_server
     state_logger.info("Starting CIL Simulator...")
     load_config()
     state_logger.info(f"Loaded devices: {list(devices_data.keys())}")
@@ -265,6 +276,10 @@ def main():
     update_thread = threading.Thread(target=update_device_data, daemon=False)
     update_thread.start()
     state_logger.info("Update thread started")
+    web_server = WebServer(devices_data, data_lock, current_sim_hour, WEB_PORT)
+    web_thread = threading.Thread(target=web_server.run, daemon=True)
+    web_thread.start()
+    state_logger.info("Web dashboard thread started on port %d", WEB_PORT)
     try:
         while True:
             if not server_thread.is_alive():
@@ -273,6 +288,8 @@ def main():
             if not update_thread.is_alive():
                 state_logger.error("Update thread terminated unexpectedly")
                 break
+            if not web_thread.is_alive():
+                state_logger.warning("Web dashboard thread stopped; simulation continues")
             time.sleep(1)
     except KeyboardInterrupt:
         state_logger.info("Shutting down CIL Simulator...")
@@ -280,6 +297,8 @@ def main():
         state_logger.info("Shutting down CIL Simulator...")
         if modbus_server and modbus_server.sock:
             modbus_server.sock.close()
+        if web_server:
+            web_server.stop()
         update_thread.join(timeout=5)
         server_thread.join(timeout=5)
 
