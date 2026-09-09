@@ -108,7 +108,7 @@ others.
 | `BatteryModel` | `BESS` | Integrates a signed power command into SOC. On hitting the SOC ceiling or floor it back-calculates the energy actually absorbed, so the kWh counters stay honest. |
 | `EVModel` | `EV` | Draws rated power inside configured charging windows (midnight-wrapping supported), capped by the written setpoint, converted to balanced three-phase currents. |
 | `LoadModel` | `Load` | Replays a demand profile interpolated from CSV at quarter-hour resolution, or jitters 80–120% of base power. |
-| `JTCLoadModel` | `JTCLoad` | The JTC common load — landlord and common services. Inherits `LoadModel` unchanged and republishes it as `JTC.Power`; the separate type is what keeps it out of the Tower 10 control loop. |
+| `JTCLoadModel` | `JTCLoad` | The JTC common load — landlord and common services. Its own algorithm, sharing no code with `LoadModel`: an operator-supplied CSV, linearly interpolated at any resolution and wrapped across midnight. No synthetic mode and no base power — the curve or nothing. |
 | `MeterModel` | `Meter` | **Derived.** Sums the other devices into net power at the point of common coupling, then integrates it on a monotonic clock into separate import and export counters. |
 | `VirtualGridModel` | `VirtualGrid` | **Derived.** Sums the JTC common load and the battery into the virtual grid incoming figure the EGC regulates against, with its own import and export counters and the three static settings. |
 
@@ -152,6 +152,41 @@ The virtual point is `JTC common load + BESS`: the JTC common load figure alread
 Tower 10 that moves the virtual import on its own. Battery charging (+) pushes the virtual import
 up, discharging (-) pulls it down.
 
+### The JTC common load
+
+`JTC_COMMON_01` is a device in `device.json` like any other, but it is **not** the building load
+model under a different name. `JTCLoadModel` imports nothing from `LoadModel` and implements its
+own curve algorithm, because the two answer different questions: the building load may fall back
+to a synthetic 80–120% jitter when it has no file, whereas the JTC common load is *only* ever the
+profile the operator supplies.
+
+That difference is deliberate. A fabricated common load would put the virtual grid point at a
+wrong value without looking wrong, so there is no fallback at all: `csv_file` is required, and a
+missing, empty or unreadable file raises at startup instead of inventing a curve.
+
+The reader is also more forgiving than the older ones, since this file comes from the operator
+rather than the repository:
+
+- a header row is **detected**, not assumed — `hour,kW` is skipped, `0.0,560` is kept
+- blank lines and `#` comments are ignored
+- points may be at any resolution — hourly, quarter-hourly, five-minute, irregular
+- interpolation is linear between neighbouring points and **wraps across midnight**, so a curve
+  ending at 23:45 joins back up to its 00:00 value instead of flattening
+
+Configure it with nothing but its curve:
+
+```json
+{ "JTCLoad": [ {
+    "DeviceKey": "JTC_COMMON_01",
+    "csv_file":  "jtc_common_curve.csv",
+    "slave_id":  9
+} ] }
+```
+
+To use your own profile, drop the file in `config/` and point `csv_file` at it — or give an
+absolute path — then restart. `config/jtc_common_curve.csv` is a worked example, not a fixture the
+code depends on.
+
 **The `Load` device under Tower 10 ships with an all-zero curve.** T98's demand is already carried
 by the JTC common load figure above the boundary, so the site is fully represented without it, and
 `LOAD_001` is left flat rather than restating demand that is already accounted for.
@@ -178,6 +213,8 @@ python3 -m unittest discover -s test -t .
 `test/test_isolation.py` asserts that `MeterModel` returns the identical value with and without
 the off-loop devices present, that an arbitrarily large JTC common load does not move it, and that
 a virtual grid update leaves every other device's registers untouched.
+`test/test_jtc_load.py` covers the common-load curve reader: header detection, comments and blank
+lines, midnight wrapping, and that a missing or empty file raises rather than falling back.
 
 ### The three static settings
 
@@ -455,10 +492,12 @@ The loader discards the first row as a header. `jtc_common_curve.csv` therefore 
 literal `hour,kW` line and keeps all 96 points; the two older files have no header and lose their
 midnight point — see Known issues.
 
-`jtc_common_curve.csv` is a landlord common-services day: about 530 kW overnight, ramping from
-06:00 to a 1,450 kW plateau in the early afternoon, then falling back through the evening. It is
-sized against the 1,700 kW import cap so that battery charging at the peak drives the virtual
-point over the limit.
+`jtc_common_curve.csv` is read by `JTCLoadModel`, not by the loaders above, so it follows the
+looser rules described under Site model — header optional, any resolution, midnight wrap. The
+shipped file is a landlord common-services day: about 530 kW overnight, ramping from 06:00 to a
+1,450 kW plateau in the early afternoon, then falling back through the evening. It is sized
+against the 1,700 kW import cap so that battery charging at the peak drives the virtual point over
+the limit. Replace it with real data whenever you have it.
 
 `load_curve.csv` is all zeros, deliberately — see Site model above for why. Put a T98 profile in
 it and the Tower 10 meter picks it up on the next restart; nothing else needs changing.
@@ -498,6 +537,7 @@ When a client sees a value it did not expect, the traffic log has the bytes.
 main.py                          entry point, threads, tick loop
 test/
   test_isolation.py              the Tower 10 loop is unaffected by the virtual point
+  test_jtc_load.py               the JTC common load curve reader
 config/
   device.json                    site definition
   modbus_registers.py            point name → register offset

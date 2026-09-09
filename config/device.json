@@ -80,8 +80,6 @@
       "JTCLoad": [
         {
           "DeviceKey": "JTC_COMMON_01",
-          "base_power": 900,
-          "mode": 0,
           "csv_file": "jtc_common_curve.csv",
           "slave_id": 9
         }

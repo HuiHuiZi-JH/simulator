@@ -36,7 +36,6 @@ LIMIT_KEYS = {
     'BESS': ('maxChargePower', 'maxDischargePower', 'ratedCapacity'),
     'EV': ('PUB_CONN.RatedPW', 'PUB_CONN.MinChargePW'),
     'Load': ('base_power',),
-    'JTCLoad': ('base_power',),
     'VirtualGrid': ('max_import', 'bess_zero_export', 't98_loop_limit'),
 }
 
@@ -74,10 +73,10 @@ CONFIG_FIELDS = {
         ('mode', 'Source', 'mode', False),
         ('csv_file', 'Curve file', 'text', False),
     ],
+    # No base power and no synthetic mode: the JTC common load is the curve
+    # the operator supplies, or nothing at all.
     'JTCLoad': [
-        ('base_power', 'Base power (kW)', 'number', True),
-        ('mode', 'Source', 'mode', False),
-        ('csv_file', 'Curve file', 'text', False),
+        ('csv_file', 'Curve file', 'text', True),
     ],
     'VirtualGrid': [
         ('max_import', 'Max import (kW)', 'number', False),
