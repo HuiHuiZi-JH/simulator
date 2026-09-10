@@ -1389,15 +1389,46 @@
     }
 
     // series
+    //
+    // A full 24 h ring is 8,640 samples per line, and a redraw runs on every
+    // pointer move -- drawing all of them costs more than the plot is wide in
+    // pixels. Where a column of pixels holds many samples, only that column's
+    // minimum and maximum are drawn, in the order they occurred: every point
+    // on screen is still a real sample and no peak is lost, because the
+    // extremes are exactly what survives.
     var ends = [];
+    var buckets = win.n > plotW ? Math.max(2, Math.floor(plotW)) : 0;
     devs.forEach(function (dev) {
       var col = hist.series[dev.key] || [];
       var d = "", pen = false, lastI = -1;
-      for (var i = 0; i < win.n; i++) {
-        var v = col[win.start + i];
-        if (v === null || v === undefined) { pen = false; continue; }
+
+      function put(i, v) {
         d += (pen ? "L" : "M") + x(i).toFixed(1) + " " + y(v).toFixed(1) + " ";
         pen = true; lastI = i;
+      }
+
+      if (!buckets) {
+        for (var i = 0; i < win.n; i++) {
+          var v = col[win.start + i];
+          if (v === null || v === undefined) { pen = false; continue; }
+          put(i, v);
+        }
+      } else {
+        for (var b = 0; b < buckets; b++) {
+          var from = Math.floor(b * win.n / buckets);
+          var to = Math.max(from + 1, Math.floor((b + 1) * win.n / buckets));
+          var iMin = -1, iMax = -1, vMin = 0, vMax = 0;
+          for (var j = from; j < to && j < win.n; j++) {
+            var w = col[win.start + j];
+            if (w === null || w === undefined) continue;
+            if (iMin < 0 || w < vMin) { iMin = j; vMin = w; }
+            if (iMax < 0 || w > vMax) { iMax = j; vMax = w; }
+          }
+          if (iMin < 0) { pen = false; continue; }
+          if (iMin === iMax) { put(iMin, vMin); continue; }
+          if (iMin < iMax) { put(iMin, vMin); put(iMax, vMax); }
+          else { put(iMax, vMax); put(iMin, vMin); }
+        }
       }
       if (!d) return;
       node.appendChild(svg("path", {

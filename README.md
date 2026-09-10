@@ -403,6 +403,20 @@ SOC and the energy counters are not on it.
   every series into one band, so the subtitle says it is above the range instead.
 - **Table view** — the same window as a table, so no value is reachable only by hovering.
 
+At the 24-hour range a line is 8,640 samples and the plot is about a thousand pixels wide, so
+where a column of pixels holds many samples only that column's **minimum and maximum** are drawn,
+in the order they occurred. Every point on screen is still a real sample and no peak is lost —
+extremes are exactly what survives — but the path drops from ~52,000 points to ~9,700 and a redraw
+from 17 ms to 6 ms, which matters because it runs on every pointer move. Below that density every
+sample is drawn. Hover, the tooltip and the table always address real samples at full resolution;
+decimation is a drawing concern only.
+
+**The chart shows what the ring holds, and the ring starts empty.** A 24-hour view is a full day
+only once the process has been running a full day; before that it shows everything recorded since
+start-up, which is what the subtitle's sample count and time span state. Nothing is backfilled: the
+simulator will not invent a past it did not simulate, for the same reason the JTC common load has
+no synthetic fallback.
+
 The chart polls `/api/history` only while its tab is open, and asks for `?after=<seq>` so it
 fetches the handful of samples it is missing rather than the whole day. A restart resets the
 sequence counter; the client notices the discontinuity and refetches in full.
