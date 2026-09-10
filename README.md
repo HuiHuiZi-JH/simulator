@@ -153,6 +153,215 @@ device has produced this cycle's values.
 
 ---
 
+## Formulas
+
+Everything the simulator computes, in one place. `h` is the simulated hour of day, `P` is kW,
+`Δt` is hours. Nothing here implements control: these produce the measurements a controller reads.
+
+### The clock
+
+```
+current_hour = start_hour + (time.time() - start_time) / 3600
+h            = current_hour mod 24
+```
+
+`start_hour` is the host's local time when `start_time` is `"now"`, otherwise the configured
+`"HH:MM"`. One real second is one simulated second.
+
+### Curve interpolation
+
+Three readers, all linear between neighbouring points, differing only at the edges.
+
+**`DayCurve.at(h)`** — the JTC common load and Tower 7 PV. Wraps midnight, so the last point of the
+day joins the first point of the next:
+
+```
+                        v₂ - v₁
+v(h) = v₁ + (h - t₁) · ─────────
+                        t₂ - t₁
+
+for h < t_first or h ≥ t_last:   t₁ = t_last,  t₂ = t_first + 24,  h += 24 if h < t_first
+```
+
+**`LoadModel.interpolate_power(h)`** and **`PVModel.interpolate_power(h)`** — the same expression on
+the bracketing pair, but they **clamp** instead of wrapping: below the first point they return the
+first value, above the last they return the last. Both files therefore carry a closing `24.00` row
+equal to their `00:00` one.
+
+### PV inverter — `PVModel`
+
+```
+mode 0 (CSV):        base = interpolate(curve, h)
+mode 1 (synthetic):  base = rated · sin²( π · (h - 6) / (18 - 6) ) · (1 + U(-0.05, +0.05))   for 6 ≤ h ≤ 18
+                     base = 0                                                                otherwise
+
+limit_power     = clamp(p_limit, 0, rated)          when a limit is written and > 0
+GenActivePW     = clamp(base, 0, limit_power)
+APProductionKWH += GenActivePW · (1/3600)
+APProduction     = GenActivePW
+```
+
+`INV.LimitPower` is the one input: writing it curtails the inverter. The synthetic arc's ±5% noise
+is redrawn every tick, so mode 1 is not reproducible between runs; mode 0 is.
+
+### Battery — `BatteryModel`
+
+```
+P         = clamp(setpoint, -maxDischargePower, +maxChargePower)
+ΔE        = P · (1/3600)                         kWh this tick
+ΔSOC      = (ΔE / ratedCapacity) · 100           percentage points
+SOC_new   = SOC + ΔSOC
+```
+
+On hitting a bound, the energy is **back-calculated** so the counters record what the battery
+actually absorbed, not what was asked for:
+
+```
+charging, SOC_new > socMax·100:     excess = SOC_new - socMax·100
+                                    ΔE    -= (excess / 100) · ratedCapacity
+                                    SOC    = socMax · 100
+
+discharging, SOC_new < socMin·100:  excess = socMin·100 - SOC_new
+                                    ΔE    += (excess / 100) · ratedCapacity
+                                    SOC    = socMin · 100
+
+TotalChargingEng    += ΔE      (charging, ΔE > 0)
+TotalDischargingEng -= ΔE      (discharging, ΔE < 0, so the total grows positive)
+BS.Soh               = 100     constant
+```
+
+**There is no loss model.** `voltage_nominal` and `resistance` are read from `device.json` and never
+used: no I²R heating, no round-trip efficiency, no taper near the SOC bounds. A kWh in is a kWh
+out. If the EGC is ever tuned against round-trip losses, they are not here to be tuned against.
+
+### EV charger — `EVModel`
+
+```
+in a charging window:   P = max(minChargePW, min(ratedPW · charge_factor, ChargePWSet))
+otherwise:              P = 0
+
+window test, start ≤ stop:   start ≤ h < stop
+window test, start > stop:   h ≥ start or h < stop        (wraps midnight)
+
+CurrentL1 = L2 = L3 = P · 1000 / (3 · V · pf)
+ChargeCurSetL1       = ChargePWSet · 1000 / (V · pf)
+ChargeEnergyKWH     += P · (1/3600)
+
+AC charger: V = 220, pf = 0.95      DC charger: V = 400, pf = 1.0
+```
+
+Note the **inconsistency between the two current lines**: the measured phase currents divide by
+`3·V·pf`, the current *setpoint* divides by `V·pf`, so for the same power the setpoint reads three
+times the per-phase current. Unresolved; no EV device is configured, so nothing reads it today.
+
+### Building load — `LoadModel`
+
+```
+mode 0 (CSV):        P = interpolate(curve, h)
+mode 1 (synthetic):  P = base_power · U(0.8, 1.2)
+```
+
+### JTC common load — `JTCLoadModel`
+
+```
+JTC.Power = DayCurve.at(h)
+```
+
+That is the whole model. No synthetic mode, no base power, no fallback — a missing or unreadable
+file raises at startup instead of inventing a curve.
+
+### Tower 7 PV — `T7PVModel`
+
+```
+T7PV.GenActivePW    = DayCurve.at(h)
+T7PV.APProductionKWH += max(P, 0) · Δt
+```
+
+### Tower 10 meter — `MeterModel` (derived)
+
+```
+load_power = Σ Load + Σ EV + Σ max(BESS, 0)          charging counts as consumption
+pv_power   = Σ PV   + Σ |min(BESS, 0)|               discharging counts as generation
+
+ActivePower = load_power - pv_power   ⇒   Load + EV + BESS - PV
+
+ActivePower > 0:  APConsumedKWH   += ActivePower · Δt
+ActivePower < 0:  APProductionKWH += |ActivePower| · Δt
+```
+
+Positive is import from the grid. `JTCLoad` and `T7PV` are not in the sum — they carry types
+`MeterModel` does not match, which is what keeps them out of the Tower 10 loop.
+
+### Virtual grid incoming — `VirtualGridModel` (derived)
+
+```
+VG.ActivePower = Σ sign_i · P_i        over the configured sources
+
+default sources (no `sources` list): every JTCLoad and every BESS, sign +1
+                                     ⇒ VG.ActivePower = JTC common load + BESS
+
+VG.ActivePower > 0:  VG.APConsumedKWH   += VG.ActivePower · Δt
+VG.ActivePower < 0:  VG.APProductionKWH += |VG.ActivePower| · Δt
+```
+
+`VG.MaxImport`, `VG.BessZeroExport` and `VG.T98LoopLimit` are published unchanged from
+`device.json` — configuration passed through, not computed.
+
+### Energy integration — two different Δt
+
+This is worth knowing before trusting a kWh counter:
+
+| Model | Δt used |
+|---|---|
+| `MeterModel`, `VirtualGridModel`, `T7PVModel` | **measured**: `(time.monotonic() - last) / 3600` |
+| `PVModel`, `BatteryModel`, `EVModel` | **assumed**: a fixed `1/3600` h, i.e. exactly one second per tick |
+
+The tick loop sleeps a flat 1.0 s per cycle and does its work on top, so a cycle is always slightly
+longer than a second. The measured counters track that; the fixed-step ones quietly run slow by
+however long the work takes. Over a day it is a fraction of a percent, and the two sets of counters
+will not agree exactly.
+
+### Modbus wire encoding
+
+```
+read  (FC3):   int32 = clamp( round_toward_zero(value · 100), -2³¹, 2³¹-1 )
+               sent big-endian signed across two consecutive registers
+
+write (FC16):  value = int32 / 100,  clamped to ±21,474,836.48
+```
+
+Every point is 32-bit, so offsets and quantities are always even.
+
+### Trend history sampling
+
+```
+sample when now ≥ next_due, then:  while next_due ≤ now:  next_due += interval
+
+interval = 10 s,  ring = 24 h / 10 s = 8,640 samples
+```
+
+Stepping the schedule by whole intervals rather than from `now` is what stops a slow tick from
+skewing every later sample.
+
+### Chart drawing
+
+Envelope decimation, when a pixel column holds more than one sample:
+
+```
+buckets = plot width in pixels
+per bucket:  draw (i_min, v_min) and (i_max, v_max), in whichever order they occurred
+```
+
+Both plotted points are real samples, so peaks survive. Axis steps are rounded to a clean interval:
+
+```
+raw  = range / 5
+mag  = 10^⌊log₁₀ raw⌋
+step = mag · (1 if raw/mag ≤ 1 else 2 if ≤ 2 else 5 if ≤ 5 else 10)
+```
+
+---
+
 ## Site model — the EGC control boundary
 
 `JTC_Archi_Diagram.png` is the architecture this simulator stands in for. The site is larger than
@@ -800,6 +1009,16 @@ When a client sees a value it did not expect, the traffic log has the bytes.
   `test/test_t98_load.py` asserts both curves load 97 points including `0.0`, so a regenerated
   file that lost its header fails a test instead of silently dropping a point.
 - **`config/deviceLogic.conf` is empty** and currently unread by any code.
+- **The battery has no loss model.** `voltage_nominal` and `resistance` are read from
+  `device.json` and never used — no I²R heating, no round-trip efficiency, no taper near the SOC
+  bounds. A kWh in is a kWh out. See Formulas.
+- **Energy counters integrate on two different clocks.** `MeterModel`, `VirtualGridModel` and
+  `T7PVModel` measure elapsed time; `PVModel`, `BatteryModel` and `EVModel` assume a fixed one
+  second per tick. The assumed ones run slightly slow, so the two sets never agree exactly. See
+  Formulas.
+- **`EVModel` computes its two current figures inconsistently** — the phase currents divide by
+  `3·V·pf` while the current setpoint divides by `V·pf`, so the setpoint reads three times the
+  per-phase current for the same power. No EV device is configured, so nothing reads it today.
 
 ---
 
