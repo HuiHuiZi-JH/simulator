@@ -102,6 +102,11 @@ Eight model classes in `src/models/`. Six simulate device behaviour from config 
 meter and the virtual grid point have no physics of their own and derive everything from the
 others.
 
+The classes are what the simulator *can* run; `config/device.json` decides what it *does* run.
+The shipped file instantiates six of the eight — see **Shipped device set** below. `EVModel` and
+`T7PVModel` stay in the tree, fully supported and tested, and come back the moment a device of
+their type is added to the file.
+
 | Model | Type key | Behaviour |
 |---|---|---|
 | `PVModel` | `PV` | Follows a 24-hour irradiance curve from CSV, or a synthetic sin² arc 06:00–18:00 with ±5% noise. Output clamped to the written power limit. |
@@ -133,7 +138,7 @@ incoming meter:
                           |
 --------------------------+--------------------------  EGC control boundary
    towers 5/6/7, podium and basement are pass-through and hidden from the loop
-   T7 PV is simulated on its own, outside both measurements
+   T7 PV can be simulated on its own, outside both measurements — no T7PV device is configured
           |                                   |
    JTC Common Load                      Tower 10 (T98)
    landlord / common services           whole T98 load
@@ -146,18 +151,47 @@ Two measurement points therefore exist, and they are deliberately independent:
 
 | Point | Device | Sums |
 |---|---|---|
-| Tower 10 grid meter | `Meter_01`, unit 1 | `Load` + `EV` - `PV` + `BESS` |
+| Tower 10 grid meter | `Meter_01`, unit 1 | `Load` - `PV` + `BESS` — plus `EV`, when a charger is configured |
 | Virtual grid incoming | `VGRID_01`, unit 6 | `JTCLoad` + `BESS` |
 
 `Meter_01` is the grid meter for the Tower 10 network: the T10 battery, inverter, charger and load
-are its terms and nothing else. `T7PV` and `JTCLoad` are in neither sum.
+are its terms and nothing else. `T7PV` and `JTCLoad` are in neither sum. The shipped config has no
+charger, so unit 1 currently reads `Load - PV + BESS`; `MeterModel` still sums the `EV` type and
+picks one up unchanged if it is added back.
 
 The virtual point is `JTC common load + BESS`: the JTC common load figure already contains Tower
 10's own demand, so T98 is not added a second time, and the battery is the one element under
 Tower 10 that moves the virtual import on its own. Battery charging (+) pushes the virtual import
 up, discharging (-) pulls it down.
 
+### Shipped device set
+
+`config/device.json` defines exactly six devices, grouped by which side of the boundary they sit
+on. The file is ordered that way too — the grid meter and the three Tower 10 devices it sums, then
+the two off-loop points — so the boundary is legible in the config itself and not only here:
+
+| Side of the boundary | Device | Type | Unit |
+|---|---|---|---|
+| Tower 10 | `Meter_01` | `Meter` | 1 |
+| Tower 10 | `PV_01` | `PV` | 2 |
+| Tower 10 | `BESS_01` | `BESS` | 5 |
+| Tower 10 | `LOAD_001` | `Load` | 8 |
+| Outside Tower 10 | `JTC_COMMON_01` | `JTCLoad` | 9 |
+| Outside Tower 10 | `VGRID_01` | `VirtualGrid` | 6 |
+
+One PV, one battery, one load and the grid meter that sums them make up the controlled network;
+the JTC common load and the virtual grid point are the two figures above the boundary. Nothing
+else is configured — in particular **no EV charger and no Tower 7 PV** — so a controller reading
+this simulator sees the six units above and no others.
+
+Both absent devices are a config decision, not a code one. Their models, their register maps, their
+curve files and their tests are all still here; adding the object back to `device.json` and
+restarting is the whole of what it takes to have them again.
+
 ### Tower 7 PV
+
+**Not in the shipped `device.json`** — the section below describes the `T7PV` type as it behaves
+when one is configured, which is what makes adding it back a one-object edit.
 
 `T7_PV_01` simulates the PV plant on Tower 7, one of the towers the EGC does not control. It is
 **excluded from the Tower 10 network and from the virtual grid figure alike** — nothing derives
@@ -299,6 +333,10 @@ than replaying data.
 Function code 16 will accept a write to any even offset, but only these three are consumed by the
 models. The rest are overwritten on the next tick.
 
+With the shipped device set the first two are the only ones reachable: there is no EV device, so
+no unit answers for the charger. Curtailing the inverter and commanding the battery are the two
+levers a controller has against Tower 10.
+
 ---
 
 ## Web dashboard
@@ -411,6 +449,8 @@ Offsets are relative to base address 0 for each unit. **W** marks a control inpu
 
 ### EV charger — unit 4
 
+*Not in the shipped device set — this map applies when an `EV` device is configured.*
+
 | Addr | Point | Meaning |
 |---|---|---|
 | 0 | `PUB_CONN.ChargePW` | Charging power |
@@ -442,6 +482,8 @@ Offsets are relative to base address 0 for each unit. **W** marks a control inpu
 | 22 | `BS.TotalDischargingEng` | Lifetime discharged |
 
 ### Tower 7 PV — unit 10
+
+*Not in the shipped device set — this map applies when a `T7PV` device is configured.*
 
 | Addr | Point | Meaning |
 |---|---|---|
@@ -479,6 +521,10 @@ Offsets are relative to base address 0 for each unit. **W** marks a control inpu
 
 Sets the simulated start time and lists the devices. Adding a second inverter or a third charger
 means adding an object, not touching code.
+
+The shipped file lists six devices in boundary order — `Meter`, `PV`, `BESS` and `Load` for Tower
+10, then `JTCLoad` and `VirtualGrid` above it. See **Shipped device set** under Site model for what
+each one is and why nothing else is there.
 
 ```json
 {
@@ -539,6 +585,9 @@ resolution, midnight wrap. Both are examples to replace with real data:
 |---|---|---|
 | `jtc_common_curve.csv` | landlord common-services day — flat overnight, ramping from 06:00 to an early-afternoon plateau, falling away through the evening | 102–200 kW |
 | `t7_pv_curve.csv` | solar day — dark until about 06:45, peaking early afternoon, dark again by 19:30 | 0–150 kW |
+
+`t7_pv_curve.csv` is kept even though no `T7PV` device is configured — it is the curve that device
+reads, and removing it would make adding one back a two-file job instead of a one-object edit.
 
 `load_curve.csv` is all zeros, deliberately — see Site model above for why. Put a T98 profile in
 it and the Tower 10 meter picks it up on the next restart; nothing else needs changing.

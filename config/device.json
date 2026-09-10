@@ -21,35 +21,6 @@
       ]
     },
     {
-      "EV": [
-        {
-          "DeviceKey": "EV_01",
-          "PUB_CONN.RatedPW": 50,
-          "PUB_CONN.MinChargePW": 0,
-          "charge_factor": 1.0,
-          "charge_schedule": [
-            {
-              "start": "03:30",
-              "stop": "04:30"
-            },
-            {
-              "start": "05:30",
-              "stop": "06:00"
-            },
-            {
-              "start": "12:00",
-              "stop": "13:00"
-            },
-            {
-              "start": "18:00",
-              "stop": "18:30"
-            }
-          ],
-          "slave_id": 4
-        }
-      ]
-    },
-    {
       "BESS": [
         {
           "DeviceKey": "BESS_01",
@@ -82,15 +53,6 @@
           "DeviceKey": "JTC_COMMON_01",
           "csv_file": "jtc_common_curve.csv",
           "slave_id": 9
-        }
-      ]
-    },
-    {
-      "T7PV": [
-        {
-          "DeviceKey": "T7_PV_01",
-          "csv_file": "t7_pv_curve.csv",
-          "slave_id": 10
         }
       ]
     },
