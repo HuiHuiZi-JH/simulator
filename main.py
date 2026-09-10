@@ -18,6 +18,7 @@ from src.models.load_model import LoadModel
 from src.models.jtc_load_model import JTCLoadModel
 from src.models.t7_pv_model import T7PVModel
 from src.models.virtual_grid_model import VirtualGridModel
+from src.history import PowerHistory
 from config.modbus_registers import REGISTERS
 
 # Load logging configuration
@@ -103,6 +104,9 @@ web_server = None
 simulation_start_time = None
 WEB_PORT = 8080
 raw_config = {}
+# The past the dashboard chart draws. Written by the simulation thread, read by
+# the web thread; empty until the first sample, and empty again after a restart.
+history = PowerHistory()
 
 
 def restart_process():
@@ -283,6 +287,9 @@ def update_device_data():
             for dev_info in devices_data.values():
                 if dev_info['type'] == 'Meter':
                     total_power += dev_info['data'].get(0, 0)
+            # Sampled outside every `with data_lock` block above -- record()
+            # takes the lock itself, and this lock is not reentrant.
+            history.record(current_time, current_hour_display, devices_data, data_lock)
         except Exception as e:
             state_logger.error(f"Error in update_device_data: {str(e)} with traceback {e.__traceback__}")
             continue
@@ -334,7 +341,7 @@ def main():
     update_thread.start()
     state_logger.info("Update thread started")
     web_server = WebServer(devices_data, data_lock, current_sim_hour, WEB_PORT,
-                           raw_config, restart_process)
+                           raw_config, restart_process, history)
     web_thread = threading.Thread(target=web_server.run, daemon=True)
     web_thread.start()
     state_logger.info("Web dashboard thread started on port %d", WEB_PORT)

@@ -35,6 +35,12 @@ No third-party dependencies. Python 3, standard library only.
 - **Models never talk to sockets.** A model takes config and returns a dict of named points. The
   mapping from names to register offsets lives in `config/modbus_registers.py`, nowhere else.
 - **Files are UTF-8.** See Known issues — `src/models/ev_model.py` currently violates this.
+- **Chart colours are validated, not chosen by eye.** The eight `--s1`…`--s8` series slots in
+  `web/index.html` were run through a colourblind-safety validator against the dashboard's own
+  light (`#FFFFFF`) and dark (`#161F26`) surfaces: every adjacent pair clears ΔE 8 under simulated
+  CVD and ΔE 15 under normal vision. Three light-mode hues fall below 3:1 contrast, which is why
+  the chart ships direct labels and a table view rather than leaving colour to carry meaning alone.
+  Changing a slot means re-running that check, and a ninth series is never a new hue.
 
 ---
 
@@ -77,6 +83,27 @@ install it with systemd. It restarts on failure and routes output to syslog.
 Every reader and writer takes the lock, so a client always sees a coherent snapshot, and anything
 written becomes an input to the next tick. The Modbus and web interfaces are equivalent: a
 setpoint written through either one lands in the same register.
+
+### Rolling history
+
+Models publish instantaneous values only — this tick's numbers and nothing older — so the
+dashboard's trend chart would open with nothing behind it. `src/history.py` keeps the past: the
+simulation thread drops one sample of every device's headline power into a fixed-size ring every
+**10 seconds**, holding **24 hours** (8,640 samples), and the web server serves it at
+`/api/history`.
+
+The ring is bounded, so memory is flat however long the process runs — the oldest sample falls off
+as the newest arrives. Nothing is persisted: a restart begins with an empty ring, exactly like SOC
+and the energy counters.
+
+`PowerHistory.record` takes `data_lock` to read `devices_data`, then appends under the module's own
+lock. The two are taken one after the other and never nested, which is what keeps the simulation
+thread and a browser request from deadlocking — and it is why `main.py` calls `record()` from
+outside every `with data_lock` block in the tick loop, since the lock is not reentrant.
+
+One point per device type is tracked, listed in `TRACKED_POINT`: the same headline power each
+device's card shows. Energy counters and SOC are deliberately absent — a chart mixing kW with kWh
+or with a percentage would need a second y-scale.
 
 ### Simulated clock
 
@@ -281,6 +308,9 @@ lines, midnight wrapping, that a missing or empty file raises rather than fallin
 the shipped curve stays inside its 100–200 kW band at every interpolated instant, not just at the
 sampled points. `test/test_t7_pv.py` does the same for Tower 7, and the isolation suite asserts
 that 150 kW of T7 generation moves neither the Tower 10 meter nor the virtual grid point.
+`test/test_history.py` covers the rolling ring behind the trend chart: that it stays bounded, that
+an incremental read joins up with what a browser already holds, and that a late tick takes its
+sample without shifting the cadence of the ones after it.
 
 ### The three static settings
 
@@ -344,7 +374,7 @@ levers a controller has against Tower 10.
 A browser UI served by the simulator itself on port 8080, built on `http.server` — no
 dependencies, in keeping with Rule 1's conventions.
 
-The dashboard has two tabs.
+The dashboard has three tabs.
 
 **Live** shows the Tower 10 point of common coupling as the headline figure with a rolling
 sparkline, then a card per device with live power, state, accumulated energy, and battery SOC. The
@@ -353,6 +383,32 @@ Tower 10 coupling point, so neither is counted into the headline generation and 
 totals. The three control
 registers get a slider and a numeric field, so curtailing the inverter or commanding the battery
 takes a drag rather than a hand-built Modbus frame.
+
+**Trends** charts every device's active power over time, drawn from the rolling history above so
+it is populated the moment the tab opens rather than filling in from empty. One line per device on
+**one** kW axis — a second scale would invent a relationship the data does not have, which is why
+SOC and the energy counters are not on it.
+
+- **Range** — 15 minutes, 1 hour, 6 hours or 24 hours, in one control row above the chart.
+- **Legend** — click a series to hide it. Colour follows the device type, never its position, so
+  hiding one never repaints the others.
+- **Hover or focus** — a crosshair snaps to the nearest sample and one tooltip lists *every*
+  visible series at that instant. The chart is keyboard-reachable: arrow keys move the crosshair,
+  Shift jumps ten samples, Home/End go to the ends, Escape clears it.
+- **Direct labels** — each line ends in a dot carrying its value; a label that would collide with
+  its neighbour is dropped rather than nudged off its line, and the legend and tooltip still carry
+  it.
+- **Max import** — the virtual grid's 1,700 kW cap is drawn as a dashed threshold whenever the
+  data comes within reach of it. When everything on screen is far below, drawing it would flatten
+  every series into one band, so the subtitle says it is above the range instead.
+- **Table view** — the same window as a table, so no value is reachable only by hovering.
+
+The chart polls `/api/history` only while its tab is open, and asks for `?after=<seq>` so it
+fetches the handful of samples it is missing rather than the whole day. A restart resets the
+sequence counter; the client notices the discontinuity and refetches in full.
+
+The open tab is in the URL — `#live`, `#trends`, `#config` — so a reload comes back where you were
+and a link can point at one.
 
 **Configuration** edits `config/device.json` in a form — start time, dashboard port, and every
 device's fields, including EV charging windows. Devices can be added and removed. Saving is
@@ -375,10 +431,21 @@ Restarting re-reads `device.json` and resets SOC, energy counters, and the simul
 |---|---|---|
 | `GET` | `/` | The dashboard page (`web/index.html`) |
 | `GET` | `/api/state` | JSON snapshot: every device, its named points, config limits |
+| `GET` | `/api/history` | Rolling power history, columnar; `?after=<seq>` returns only newer samples |
 | `POST` | `/api/control` | Write one control register |
 | `GET` | `/api/config` | Current `device.json`, the editable field schema, and the restart flag |
 | `POST` | `/api/config` | Validate and write `device.json` |
 | `POST` | `/api/restart` | Restart the simulator in place |
+
+`/api/history` answers with the sample interval and span, a sequence counter, the simulated hour of
+each sample, and one array per device:
+
+```json
+{ "interval": 10.0, "span_hours": 24.0, "seq": 431, "first_seq": 1, "count": 431,
+  "sim_hour": [13.80, 13.81, "..."],
+  "series":   { "Meter_01": [-100.0, -98.4, "..."], "VGRID_01": [200.0, 203.1, "..."] },
+  "devices":  [ { "key": "Meter_01", "type": "Meter", "point": "ActivePower" } ] }
+```
 
 ```
 curl -X POST http://localhost:8080/api/control \
@@ -626,6 +693,7 @@ When a client sees a value it did not expect, the traffic log has the bytes.
 ```
 main.py                          entry point, threads, tick loop
 test/
+  test_history.py                the rolling power ring behind the trend chart
   test_isolation.py              the Tower 10 loop is unaffected by the virtual point
   test_jtc_load.py               the JTC common load curve reader
   test_t7_pv.py                  the Tower 7 PV curve reader
@@ -637,6 +705,7 @@ config/
   jtc_common_curve.csv           24h JTC common load profile
   t7_pv_curve.csv                24h Tower 7 PV profile
 src/
+  history.py                     rolling power ring the trend chart reads
   communication/modbus_server.py Modbus TCP server
   communication/web_server.py    dashboard HTTP server and JSON API
   models/                        eight device models

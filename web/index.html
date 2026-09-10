@@ -16,6 +16,8 @@
     --gen:#2C7F60; --gen-soft:#DCEDE5;
     --con:#B04E2A; --con-soft:#F5E3DA;
     --warn:#B4780E;
+    --s1:#2a78d6; --s2:#eb6834; --s3:#1baf7a; --s4:#eda100;
+    --s5:#e87ba4; --s6:#008300; --s7:#4a3aa7; --s8:#e34948;
     --shadow:0 1px 2px rgba(19,28,36,.06), 0 8px 24px -14px rgba(19,28,36,.2);
   }
   @media (prefers-color-scheme: dark) {
@@ -27,6 +29,8 @@
       --gen:#56BE92; --gen-soft:#173428;
       --con:#E28A63; --con-soft:#372218;
       --warn:#D9A441;
+      --s1:#3987e5; --s2:#d95926; --s3:#199e70; --s4:#c98500;
+      --s5:#d55181; --s6:#008300; --s7:#9085e9; --s8:#e66767;
       --shadow:0 1px 2px rgba(0,0,0,.4), 0 8px 24px -14px rgba(0,0,0,.7);
     }
   }
@@ -38,10 +42,16 @@
     --gen:#56BE92; --gen-soft:#173428;
     --con:#E28A63; --con-soft:#372218;
     --warn:#D9A441;
+    --s1:#3987e5; --s2:#d95926; --s3:#199e70; --s4:#c98500;
+    --s5:#d55181; --s6:#008300; --s7:#9085e9; --s8:#e66767;
     --shadow:0 1px 2px rgba(0,0,0,.4), 0 8px 24px -14px rgba(0,0,0,.7);
   }
 
   * { box-sizing:border-box; }
+  /* An author `display` beats the UA sheet's [hidden] rule, so .banner's
+     display:flex was keeping the restart banner on screen permanently. Pin the
+     attribute here once rather than per-component. */
+  [hidden] { display:none !important; }
   body {
     margin:0; background:var(--ground); color:var(--ink);
     font-family:Archivo,"Helvetica Neue",Arial,sans-serif;
@@ -228,6 +238,84 @@
   .toast.show { opacity:1; }
   .toast.err { background:var(--con); color:#fff; }
 
+  /* ---- trends chart ---- */
+  .toolbar {
+    display:flex; align-items:center; gap:.6rem; flex-wrap:wrap;
+    margin:clamp(1.25rem,3vw,2rem) 0 .85rem;
+  }
+  .toolbar .grow { margin-left:auto; }
+  .segmented {
+    display:inline-flex; gap:2px; padding:2px; border-radius:999px;
+    background:var(--sunken); border:1px solid var(--line);
+  }
+  .segmented button {
+    font-family:Archivo,Arial,sans-serif; font-size:.76rem; font-weight:600;
+    color:var(--muted); background:transparent; border:0; cursor:pointer;
+    padding:.3rem .7rem; border-radius:999px;
+  }
+  .segmented button[aria-pressed="true"] { background:var(--surface); color:var(--ink); }
+  .segmented button:hover { color:var(--ink); }
+
+  .chartcard {
+    background:var(--surface); border:1px solid var(--line); border-radius:12px;
+    box-shadow:var(--shadow); padding:clamp(1rem,2.5vw,1.5rem);
+  }
+  .chartcard h2 { margin:0; font-size:1rem; letter-spacing:-.01em; }
+  .chartsub { margin:.2rem 0 0; font-size:.79rem; color:var(--muted); }
+
+  .legend { display:flex; flex-wrap:wrap; gap:.3rem .45rem; margin:1rem 0 .6rem; }
+  .legend button {
+    display:inline-flex; align-items:center; gap:.45rem; cursor:pointer;
+    font-family:Archivo,Arial,sans-serif; font-size:.77rem; font-weight:500;
+    color:var(--ink); background:transparent; padding:.24rem .6rem;
+    border:1px solid var(--hairline); border-radius:999px;
+  }
+  .legend button:hover { border-color:var(--line); }
+  .legend button[aria-pressed="false"] { color:var(--faint); }
+  .legend .key { width:14px; height:2px; border-radius:1px; flex:none; }
+  .legend button[aria-pressed="false"] .key { opacity:.3; }
+
+  .plotwrap { position:relative; margin-top:.2rem; }
+  .plot { display:block; width:100%; touch-action:none; }
+  .plot:focus-visible { outline:2px solid var(--accent); outline-offset:3px; border-radius:8px; }
+  .plot-empty {
+    display:flex; align-items:center; justify-content:center; min-height:220px;
+    color:var(--faint); font-size:.85rem; text-align:center; padding:1rem;
+  }
+
+  .tip {
+    position:absolute; z-index:5; pointer-events:none; min-width:12rem;
+    background:var(--surface); border:1px solid var(--line); border-radius:8px;
+    box-shadow:var(--shadow); padding:.55rem .65rem;
+  }
+  .tip h3 {
+    margin:0 0 .45rem; font-family:"IBM Plex Mono",monospace; font-weight:500;
+    font-size:.7rem; letter-spacing:.09em; text-transform:uppercase; color:var(--faint);
+  }
+  .tip .row { display:flex; align-items:center; gap:.5rem; font-size:.78rem; }
+  .tip .row + .row { margin-top:.18rem; }
+  .tip .row .key { width:12px; height:2px; border-radius:1px; flex:none; }
+  .tip .row .n { color:var(--muted); }
+  .tip .row .v {
+    margin-left:auto; font-family:"IBM Plex Mono",monospace; font-weight:600;
+    font-variant-numeric:tabular-nums; color:var(--ink);
+  }
+
+  .charttable { margin-top:1rem; overflow-x:auto; }
+  .charttable table { width:100%; border-collapse:collapse; font-size:.78rem; }
+  .charttable caption {
+    caption-side:top; text-align:left; color:var(--muted);
+    font-size:.78rem; padding-bottom:.5rem;
+  }
+  .charttable th, .charttable td {
+    padding:.3rem .5rem; text-align:right; border-bottom:1px solid var(--hairline);
+    font-variant-numeric:tabular-nums; white-space:nowrap;
+  }
+  .charttable th:first-child, .charttable td:first-child { text-align:left; }
+  .charttable thead th { color:var(--muted); font-weight:600; position:sticky; top:0; background:var(--surface); }
+  .charttable .keycell { display:inline-flex; align-items:center; gap:.4rem; }
+  .charttable .keycell .key { width:12px; height:2px; border-radius:1px; flex:none; }
+
   /* ---- tabs + config ---- */
   .tabs { display:flex; gap:.25rem; }
   .tab {
@@ -322,6 +410,7 @@
     <div class="brand">MicroGrid <span>Simulator</span></div>
     <div class="tabs" role="tablist">
       <button class="tab" id="tab-live" role="tab" aria-selected="true" aria-controls="view-live">Live</button>
+      <button class="tab" id="tab-trends" role="tab" aria-selected="false" aria-controls="view-trends">Trends</button>
       <button class="tab" id="tab-config" role="tab" aria-selected="false" aria-controls="view-config">Configuration</button>
     </div>
     <div class="clock">sim <b id="simclock">--:--</b></div>
@@ -376,6 +465,37 @@
   </div>
 
   </div><!-- /view-live -->
+
+  <div class="view" id="view-trends" role="tabpanel" aria-labelledby="tab-trends" hidden>
+
+    <!-- One filter row, above everything it scopes. -->
+    <div class="toolbar">
+      <div class="segmented" id="range-picker" role="group" aria-label="Time range">
+        <button type="button" data-mins="15" aria-pressed="false">15 min</button>
+        <button type="button" data-mins="60" aria-pressed="true">1 hour</button>
+        <button type="button" data-mins="360" aria-pressed="false">6 hours</button>
+        <button type="button" data-mins="1440" aria-pressed="false">24 hours</button>
+      </div>
+      <div class="grow"></div>
+      <button type="button" class="ghost small" id="table-toggle" aria-pressed="false">Table view</button>
+    </div>
+
+    <section class="chartcard">
+      <h2>Power over time</h2>
+      <p class="chartsub" id="chart-sub">Every device&rsquo;s active power, kW.</p>
+
+      <div class="legend" id="chart-legend"></div>
+
+      <div class="plotwrap">
+        <svg class="plot" id="chart" role="img" tabindex="0"
+             aria-label="Active power of every simulated device over time"></svg>
+        <div class="tip" id="chart-tip" role="status" hidden></div>
+      </div>
+
+      <div class="charttable" id="chart-table" hidden></div>
+    </section>
+
+  </div><!-- /view-trends -->
 
   <div class="view" id="view-config" role="tabpanel" aria-labelledby="tab-config" hidden>
     <h2>Site configuration</h2>
@@ -699,6 +819,7 @@
   /* ---------- poll ---------- */
 
   function render(state) {
+    lastSnapshot = state;
     $("restart-banner").hidden = !state.restart_needed;
     $("simclock").textContent = hourToClock(state.sim_hour);
     $("wallclock").textContent = state.wall_time;
@@ -1001,19 +1122,526 @@
     }).catch(function (e) { toast("Could not save: " + e.message, true); });
   }
 
+  /* ---------- trends chart ---------- */
+
+  // One fixed colour slot per device type. The slot follows the device, never
+  // its position in the list, so hiding a series cannot repaint the others.
+  var SERIES = {
+    Meter:       { slot: 1, name: "Tower 10 meter",        tag: "Meter" },
+    VirtualGrid: { slot: 2, name: "Virtual grid incoming", tag: "VGrid" },
+    PV:          { slot: 3, name: "Tower 10 PV",           tag: "PV" },
+    BESS:        { slot: 4, name: "Battery",               tag: "BESS" },
+    JTCLoad:     { slot: 5, name: "JTC common load",       tag: "JTC" },
+    Load:        { slot: 6, name: "Building load",         tag: "Load" },
+    EV:          { slot: 7, name: "EV charger",            tag: "EV" },
+    T7PV:        { slot: 8, name: "Tower 7 PV",            tag: "T7PV" }
+  };
+
+  var SVGNS = "http://www.w3.org/2000/svg";
+  var PAD = { l: 58, r: 86, t: 16, b: 30 };
+  var PLOT_H = 360;
+
+  var hist = { interval: 10, span: 24, seq: 0, t: [], series: {}, devs: [], max: 8640 };
+  var hidden = {};          // device key -> true when toggled off
+  var rangeMins = 60;
+  var hoverIdx = null;
+  var tableOn = false;
+  var trendsTimer = null;
+  var lastSnapshot = null;  // set by render(), for the max-import reference line
+
+  function svg(tag, attrs) {
+    var n = document.createElementNS(SVGNS, tag);
+    for (var k in attrs) { if (attrs[k] !== null) n.setAttribute(k, attrs[k]); }
+    return n;
+  }
+
+  function seriesColor(dev) { return "var(--s" + dev.slot + ")"; }
+
+  function clockAt(i, withSeconds) {
+    var h = hist.t[i];
+    if (h === undefined) return "--:--";
+    if (!withSeconds) return hourToClock(h);
+    var secs = Math.round(h * 3600) % 60;
+    return hourToClock(h) + ":" + String(secs).padStart(2, "0");
+  }
+
+  // A window shorter than half an hour puts several samples inside one minute,
+  // so the labels carry seconds rather than repeating the same HH:MM.
+  function fineClock() { return rangeMins <= 30; }
+
+  /* ----- data ----- */
+
+  function fetchHistory(full) {
+    var url = "/api/history" + (full || !hist.seq ? "" : "?after=" + hist.seq);
+    return fetch(url, { cache: "no-store" })
+      .then(function (r) { if (!r.ok) throw new Error("HTTP " + r.status); return r.json(); })
+      .then(function (d) {
+        // A restart resets the counter, and a browser left asleep can fall off
+        // the back of the ring: in both cases the increment would not join up,
+        // so refetch the whole buffer instead of splicing a gap.
+        if (!full && hist.seq && (d.seq < hist.seq ||
+            (d.first_seq !== null && d.first_seq > hist.seq + 1))) {
+          return fetchHistory(true);
+        }
+        absorb(d, full || !hist.seq);
+        drawChart();
+        if (tableOn) renderTable();
+      });
+  }
+
+  function absorb(d, replace) {
+    hist.interval = d.interval || hist.interval;
+    hist.span = d.span_hours || hist.span;
+    hist.max = Math.max(1, Math.round(hist.span * 3600 / hist.interval));
+    hist.seq = d.seq;
+
+    if (replace) { hist.t = []; hist.series = {}; }
+
+    hist.devs = (d.devices || []).filter(function (x) { return SERIES[x.type]; })
+      .map(function (x) {
+        return { key: x.key, type: x.type, slot: SERIES[x.type].slot,
+                 name: SERIES[x.type].name, tag: SERIES[x.type].tag };
+      })
+      .sort(function (a, b) { return a.slot - b.slot; });
+
+    hist.devs.forEach(function (dev) {
+      if (!hist.series[dev.key]) hist.series[dev.key] = [];
+    });
+
+    var incoming = d.sim_hour || [];
+    for (var i = 0; i < incoming.length; i++) {
+      hist.t.push(incoming[i]);
+      hist.devs.forEach(function (dev) {
+        var col = (d.series || {})[dev.key];
+        hist.series[dev.key].push(col ? col[i] : null);
+      });
+    }
+    // Trim to the same span the server keeps, so a long-lived tab cannot grow
+    // without bound even though the server's own ring is already bounded.
+    var over = hist.t.length - hist.max;
+    if (over > 0) {
+      hist.t.splice(0, over);
+      hist.devs.forEach(function (dev) { hist.series[dev.key].splice(0, over); });
+    }
+    buildLegend();
+  }
+
+  function visibleDevs() {
+    return hist.devs.filter(function (d) { return !hidden[d.key]; });
+  }
+
+  function window_() {
+    var n = Math.min(hist.t.length, Math.round(rangeMins * 60 / hist.interval));
+    return { start: hist.t.length - n, n: n };
+  }
+
+  function maxImport() {
+    if (!lastSnapshot) return null;
+    for (var i = 0; i < lastSnapshot.devices.length; i++) {
+      var d = lastSnapshot.devices[i];
+      if (d.type === "VirtualGrid" && d.points["VG.MaxImport"]) return d.points["VG.MaxImport"];
+    }
+    return null;
+  }
+
+  /* ----- legend ----- */
+
+  function buildLegend() {
+    var host = $("chart-legend");
+    if (host._n === hist.devs.length && host.children.length) return;
+    host.innerHTML = "";
+    host._n = hist.devs.length;
+    hist.devs.forEach(function (dev) {
+      var b = el("button");
+      b.type = "button";
+      b.setAttribute("aria-pressed", hidden[dev.key] ? "false" : "true");
+      var k = el("span", "key");
+      k.style.background = seriesColor(dev);
+      b.appendChild(k);
+      b.appendChild(document.createTextNode(dev.name));
+      b.addEventListener("click", function () {
+        hidden[dev.key] = !hidden[dev.key];
+        b.setAttribute("aria-pressed", hidden[dev.key] ? "false" : "true");
+        drawChart();
+        if (tableOn) renderTable();
+      });
+      host.appendChild(b);
+    });
+  }
+
+  /* ----- scales ----- */
+
+  function niceStep(range, target) {
+    var raw = range / Math.max(1, target);
+    var mag = Math.pow(10, Math.floor(Math.log10(raw || 1)));
+    var norm = raw / mag;
+    var step = norm <= 1 ? 1 : norm <= 2 ? 2 : norm <= 5 ? 5 : 10;
+    return step * mag;
+  }
+
+  function domain(win, devs) {
+    var lo = 0, hi = 0, any = false;
+    devs.forEach(function (dev) {
+      var col = hist.series[dev.key] || [];
+      for (var i = win.start; i < hist.t.length; i++) {
+        var v = col[i];
+        if (v === null || v === undefined) continue;
+        if (!any) { lo = hi = v; any = true; }
+        lo = Math.min(lo, v); hi = Math.max(hi, v);
+      }
+    });
+    if (!any) return null;
+    lo = Math.min(lo, 0); hi = Math.max(hi, 0);          // zero is always in frame
+    // Bring the import cap into the frame only when the data is within reach of
+    // it. Forcing a 1,700 kW line onto a 200 kW day would flatten every series.
+    var thr = maxImport();
+    if (thr && hi > 0 && thr <= hi * 1.35) hi = Math.max(hi, thr);
+    if (hi === lo) { hi = lo + 1; }
+    var step = niceStep(hi - lo, 5);
+    return { lo: Math.floor(lo / step) * step, hi: Math.ceil(hi / step) * step, step: step };
+  }
+
+  /* ----- drawing ----- */
+
+  function drawChart() {
+    var node = $("chart");
+    var W = Math.max(320, node.parentNode.clientWidth || 640);
+    node.setAttribute("viewBox", "0 0 " + W + " " + PLOT_H);
+    node.setAttribute("height", PLOT_H);
+    while (node.firstChild) node.removeChild(node.firstChild);
+    $("chart-tip").hidden = true;
+
+    var empty = $("chart-empty");
+    var win = window_();
+    var devs = visibleDevs();
+    var dom = win.n > 0 ? domain(win, devs) : null;
+
+    subtitle(win, dom);
+
+    if (!dom) {
+      node.style.display = "none";
+      if (!empty) {
+        empty = el("div", "plot-empty", hist.t.length
+          ? "Every series is hidden — switch one back on in the legend."
+          : "No samples yet. The first arrives within " + hist.interval + " seconds of start-up.");
+        empty.id = "chart-empty";
+        $("chart").parentNode.appendChild(empty);
+      } else {
+        empty.textContent = hist.t.length
+          ? "Every series is hidden — switch one back on in the legend."
+          : "No samples yet. The first arrives within " + hist.interval + " seconds of start-up.";
+      }
+      return;
+    }
+    if (empty) empty.remove();
+    node.style.display = "";
+
+    var plotW = W - PAD.l - PAD.r, plotH = PLOT_H - PAD.t - PAD.b;
+    var x = function (i) {
+      return win.n < 2 ? PAD.l + plotW : PAD.l + (i / (win.n - 1)) * plotW;
+    };
+    var y = function (v) {
+      return PAD.t + (1 - (v - dom.lo) / (dom.hi - dom.lo)) * plotH;
+    };
+
+    // gridlines + y ticks -- solid hairlines, one step off the surface
+    for (var g = dom.lo; g <= dom.hi + 1e-9; g += dom.step) {
+      var zero = Math.abs(g) < 1e-9;
+      node.appendChild(svg("line", {
+        x1: PAD.l, x2: PAD.l + plotW, y1: y(g), y2: y(g),
+        stroke: zero ? "var(--line)" : "var(--hairline)", "stroke-width": 1
+      }));
+      var tick = svg("text", {
+        x: PAD.l - 8, y: y(g) + 4, "text-anchor": "end",
+        fill: "var(--faint)", "font-size": 11
+      });
+      tick.setAttribute("style", "font-variant-numeric:tabular-nums");
+      tick.textContent = Math.round(g).toLocaleString();
+      node.appendChild(tick);
+    }
+
+    // x ticks -- clock time from the sample's own simulated hour
+    var ticks = Math.max(2, Math.min(7, Math.floor(plotW / 90)));
+    for (var s = 0; s < ticks; s++) {
+      var idx = win.n < 2 ? 0 : Math.round(s * (win.n - 1) / (ticks - 1));
+      var lab = svg("text", {
+        x: x(idx), y: PLOT_H - 10, "text-anchor": s === 0 ? "start" : (s === ticks - 1 ? "end" : "middle"),
+        fill: "var(--faint)", "font-size": 11
+      });
+      lab.textContent = clockAt(win.start + idx, fineClock());
+      node.appendChild(lab);
+    }
+
+    // the import cap, when it is on scale: a threshold, drawn dashed so it
+    // never reads as one of the solid data lines
+    var thr = maxImport();
+    if (thr && thr <= dom.hi && thr >= dom.lo) {
+      node.appendChild(svg("line", {
+        x1: PAD.l, x2: PAD.l + plotW, y1: y(thr), y2: y(thr),
+        stroke: "var(--warn)", "stroke-width": 1, "stroke-dasharray": "5 4"
+      }));
+      var cap = svg("text", {
+        x: PAD.l + plotW, y: y(thr) - 6, "text-anchor": "end",
+        fill: "var(--warn)", "font-size": 11
+      });
+      cap.textContent = "Max import " + Math.round(thr).toLocaleString() + " kW";
+      node.appendChild(cap);
+    }
+
+    // series
+    var ends = [];
+    devs.forEach(function (dev) {
+      var col = hist.series[dev.key] || [];
+      var d = "", pen = false, lastI = -1;
+      for (var i = 0; i < win.n; i++) {
+        var v = col[win.start + i];
+        if (v === null || v === undefined) { pen = false; continue; }
+        d += (pen ? "L" : "M") + x(i).toFixed(1) + " " + y(v).toFixed(1) + " ";
+        pen = true; lastI = i;
+      }
+      if (!d) return;
+      node.appendChild(svg("path", {
+        d: d.trim(), fill: "none", stroke: seriesColor(dev), "stroke-width": 2,
+        "stroke-linejoin": "round", "stroke-linecap": "round"
+      }));
+      if (lastI >= 0) {
+        ends.push({ dev: dev, x: x(lastI), y: y(col[win.start + lastI]), v: col[win.start + lastI] });
+      }
+    });
+
+    // end markers + selective direct labels: the value rides the line it
+    // belongs to, and a label that would collide is dropped rather than
+    // nudged off its line -- the legend and tooltip still carry it.
+    var placed = [];
+    ends.forEach(function (e) {
+      node.appendChild(svg("circle", {
+        cx: e.x, cy: e.y, r: 3.5, fill: seriesColor(e.dev),
+        stroke: "var(--surface)", "stroke-width": 2
+      }));
+      var clash = placed.some(function (p) { return Math.abs(p - e.y) < 13; });
+      if (clash) return;
+      placed.push(e.y);
+      var t = svg("text", {
+        x: e.x + 9, y: e.y + 4, fill: "var(--ink)", "font-size": 11
+      });
+      t.setAttribute("style", "font-variant-numeric:tabular-nums");
+      t.textContent = e.dev.tag + " " + fmt(e.v, 1);
+      node.appendChild(t);
+    });
+
+    // hover layer
+    if (hoverIdx !== null && hoverIdx >= 0 && hoverIdx < win.n) {
+      node.appendChild(svg("line", {
+        x1: x(hoverIdx), x2: x(hoverIdx), y1: PAD.t, y2: PAD.t + plotH,
+        stroke: "var(--line)", "stroke-width": 1
+      }));
+      devs.forEach(function (dev) {
+        var v = (hist.series[dev.key] || [])[win.start + hoverIdx];
+        if (v === null || v === undefined) return;
+        node.appendChild(svg("circle", {
+          cx: x(hoverIdx), cy: y(v), r: 4, fill: seriesColor(dev),
+          stroke: "var(--surface)", "stroke-width": 2
+        }));
+      });
+      showTip(win, devs, x(hoverIdx), W);
+    }
+
+    node._geom = { win: win, x: x, W: W };
+  }
+
+  function subtitle(win, dom) {
+    var parts = ["Active power in kW, sampled every " + hist.interval + " s"];
+    if (win.n) {
+      parts.push(clockAt(win.start, fineClock()) + "–" +
+                 clockAt(hist.t.length - 1, fineClock()) + " (" + win.n + " samples)");
+    }
+    var thr = maxImport();
+    if (thr && (!dom || thr > dom.hi)) {
+      parts.push("virtual grid max import " + Math.round(thr).toLocaleString() + " kW is above this range");
+    }
+    $("chart-sub").textContent = parts.join(" · ");
+  }
+
+  /* ----- tooltip ----- */
+
+  function showTip(win, devs, px, W) {
+    var tip = $("chart-tip");
+    tip.innerHTML = "";
+    var h = el("h3", null, clockAt(win.start + hoverIdx, true));
+    tip.appendChild(h);
+    devs.forEach(function (dev) {
+      var v = (hist.series[dev.key] || [])[win.start + hoverIdx];
+      var row = el("div", "row");
+      var k = el("span", "key");
+      k.style.background = seriesColor(dev);
+      row.appendChild(k);
+      row.appendChild(el("span", "n", dev.name));
+      row.appendChild(el("span", "v", fmt(v, 1) + " kW"));
+      tip.appendChild(row);
+    });
+    tip.hidden = false;
+    var box = tip.getBoundingClientRect();
+    var left = px + 14;
+    // Flip before the tooltip reaches the right gutter, so it never sits on
+    // top of the end labels it is meant to complement.
+    if (left + box.width > W - PAD.r) left = px - box.width - 14;
+    tip.style.left = Math.max(0, left) + "px";
+    tip.style.top = PAD.t + "px";
+  }
+
+  function nearestIndex(clientX) {
+    var node = $("chart");
+    if (!node._geom) return null;
+    var r = node.getBoundingClientRect();
+    var win = node._geom.win;
+    if (!win.n) return null;
+    var px = (clientX - r.left) * (node._geom.W / r.width);
+    var plotW = node._geom.W - PAD.l - PAD.r;
+    var frac = (px - PAD.l) / plotW;
+    return Math.max(0, Math.min(win.n - 1, Math.round(frac * (win.n - 1))));
+  }
+
+  /* ----- table view (the value is always reachable without hovering) ----- */
+
+  function renderTable() {
+    var host = $("chart-table");
+    host.innerHTML = "";
+    var win = window_(), devs = visibleDevs();
+    if (!win.n || !devs.length) {
+      host.appendChild(el("p", "chartsub", "Nothing to tabulate yet."));
+      return;
+    }
+    var stride = Math.ceil(win.n / 200);
+    var table = el("table");
+    var cap = el("caption", null,
+      "Newest first, every " + (stride * hist.interval) + " s of the selected range" +
+      (stride > 1 ? " (thinned from " + hist.interval + " s samples to keep the table readable)" : "") + ". Values in kW.");
+    table.appendChild(cap);
+
+    var thead = el("thead"), hr = el("tr");
+    hr.appendChild(el("th", null, "Time"));
+    devs.forEach(function (dev) {
+      var th = el("th");
+      var span = el("span", "keycell");
+      var k = el("span", "key");
+      k.style.background = seriesColor(dev);
+      span.appendChild(k);
+      span.appendChild(document.createTextNode(dev.name));
+      th.appendChild(span);
+      hr.appendChild(th);
+    });
+    thead.appendChild(hr);
+    table.appendChild(thead);
+
+    var tb = el("tbody");
+    for (var i = hist.t.length - 1; i >= win.start; i -= stride) {
+      var tr = el("tr");
+      tr.appendChild(el("td", null, clockAt(i, true)));
+      devs.forEach(function (dev) {
+        tr.appendChild(el("td", null, fmt((hist.series[dev.key] || [])[i], 1)));
+      });
+      tb.appendChild(tr);
+    }
+    table.appendChild(tb);
+    host.appendChild(table);
+  }
+
+  /* ----- wiring ----- */
+
+  $("range-picker").addEventListener("click", function (e) {
+    var b = e.target.closest("button[data-mins]");
+    if (!b) return;
+    rangeMins = Number(b.dataset.mins);
+    Array.prototype.forEach.call(this.querySelectorAll("button"), function (o) {
+      o.setAttribute("aria-pressed", o === b ? "true" : "false");
+    });
+    hoverIdx = null;
+    drawChart();
+    if (tableOn) renderTable();
+  });
+
+  $("table-toggle").addEventListener("click", function () {
+    tableOn = !tableOn;
+    this.setAttribute("aria-pressed", tableOn ? "true" : "false");
+    $("chart-table").hidden = !tableOn;
+    if (tableOn) renderTable();
+  });
+
+  $("chart").addEventListener("pointermove", function (e) {
+    var i = nearestIndex(e.clientX);
+    if (i === hoverIdx) return;
+    hoverIdx = i;
+    drawChart();
+  });
+  $("chart").addEventListener("pointerleave", function () {
+    if (hoverIdx === null) return;
+    hoverIdx = null;
+    drawChart();
+  });
+  // Keyboard reaches the same readout as the pointer.
+  $("chart").addEventListener("keydown", function (e) {
+    var win = window_();
+    if (!win.n) return;
+    var step = e.shiftKey ? 10 : 1, next = hoverIdx;
+    if (e.key === "ArrowLeft") next = (hoverIdx === null ? win.n - 1 : hoverIdx) - step;
+    else if (e.key === "ArrowRight") next = (hoverIdx === null ? 0 : hoverIdx) + step;
+    else if (e.key === "Home") next = 0;
+    else if (e.key === "End") next = win.n - 1;
+    else if (e.key === "Escape") next = null;
+    else return;
+    e.preventDefault();
+    hoverIdx = next === null ? null : Math.max(0, Math.min(win.n - 1, next));
+    drawChart();
+  });
+
+  var resizeQueued = false;
+  window.addEventListener("resize", function () {
+    if (resizeQueued || $("view-trends").hidden) return;
+    resizeQueued = true;
+    requestAnimationFrame(function () { resizeQueued = false; drawChart(); });
+  });
+
+  function startTrends() {
+    fetchHistory(!hist.seq).catch(function () { /* the state poll reports the outage */ });
+    if (trendsTimer) clearInterval(trendsTimer);
+    trendsTimer = setInterval(function () {
+      fetchHistory(false).catch(function () {});
+    }, Math.max(2000, hist.interval * 1000));
+  }
+
+  function stopTrends() {
+    if (trendsTimer) clearInterval(trendsTimer);
+    trendsTimer = null;
+  }
+
   /* ---------- tabs ---------- */
 
   function showTab(which) {
-    var live = which === "live";
-    $("tab-live").setAttribute("aria-selected", live);
-    $("tab-config").setAttribute("aria-selected", !live);
-    $("view-live").hidden = !live;
-    $("view-config").hidden = live;
-    if (!live && !cfg) loadConfig();
+    ["live", "trends", "config"].forEach(function (name) {
+      var on = name === which;
+      $("tab-" + name).setAttribute("aria-selected", on);
+      $("view-" + name).hidden = !on;
+    });
+    if (which === "config" && !cfg) loadConfig();
+    // The history poll runs only while its tab is open -- the Live tab's own
+    // 1 Hz state poll is enough to keep everything else current.
+    if (which === "trends") { startTrends(); } else { stopTrends(); }
+    if (which === "trends") drawChart();
   }
 
-  $("tab-live").addEventListener("click", function () { showTab("live"); });
-  $("tab-config").addEventListener("click", function () { showTab("config"); });
+  ["live", "trends", "config"].forEach(function (name) {
+    $("tab-" + name).addEventListener("click", function () {
+      // The tab lives in the URL, so a reload -- and a link -- comes back to it.
+      if (location.hash !== "#" + name) location.hash = name;
+      else showTab(name);
+    });
+  });
+  window.addEventListener("hashchange", function () { showTab(tabFromHash()); });
+
+  function tabFromHash() {
+    var want = (location.hash || "").replace("#", "");
+    return ["live", "trends", "config"].indexOf(want) >= 0 ? want : "live";
+  }
   $("cfg-now").addEventListener("change", syncStartInputs);
   $("cfg-save").addEventListener("click", saveConfig);
   $("cfg-reload").addEventListener("click", function () { cfg = null; loadConfig(); });
@@ -1076,6 +1704,7 @@
   $("restart-btn").addEventListener("click", restartSimulator);
   $("cfg-restart").addEventListener("click", restartSimulator);
 
+  showTab(tabFromHash());
   poll();
   setInterval(poll, POLL_MS);
 })();

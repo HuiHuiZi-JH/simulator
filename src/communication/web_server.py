@@ -11,6 +11,7 @@ import logging
 import os
 import threading
 import time
+import urllib.parse
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 from config.modbus_registers import REGISTERS
@@ -190,7 +191,7 @@ def validate_config(cfg):
 
 class WebServer:
     def __init__(self, devices_data, data_lock, get_sim_hour, port=8080,
-                 loaded_config=None, restart_hook=None):
+                 loaded_config=None, restart_hook=None, history=None):
         self.devices_data = devices_data
         self.data_lock = data_lock
         self.get_sim_hour = get_sim_hour
@@ -200,6 +201,10 @@ class WebServer:
         # tell the operator when the file on disk has drifted ahead of it.
         self.loaded_config = copy.deepcopy(loaded_config or {})
         self.restart_hook = restart_hook
+        # The rolling sample ring the trend chart reads. None when the server is
+        # constructed without one -- the endpoint then answers empty rather than
+        # 404, so the chart shows its "no samples yet" state instead of an error.
+        self.history = history
 
     # ---------- live state ----------
 
@@ -224,6 +229,19 @@ class WebServer:
                 'wall_time': time.strftime('%H:%M:%S'),
                 'restart_needed': self.restart_needed(),
                 'devices': devices}
+
+    def history_dump(self, path):
+        """Serve the sample ring, or only what is newer than ?after=<seq>."""
+        after = urllib.parse.parse_qs(
+            urllib.parse.urlparse(path).query).get('after', [None])[0]
+        try:
+            after = int(after) if after is not None else None
+        except (TypeError, ValueError):
+            after = None
+        if self.history is None:
+            return {'interval': 0, 'span_hours': 0, 'seq': 0, 'first_seq': None,
+                    'count': 0, 'sim_hour': [], 'series': {}, 'devices': []}
+        return self.history.dump(after)
 
     def apply_setpoint(self, device_key, point, value):
         """Write a control register, exactly as a Modbus FC16 write would."""
@@ -324,6 +342,8 @@ class WebServer:
                                    'text/plain; charset=utf-8')
                 elif self.path.startswith('/api/state'):
                     self._json(200, server.snapshot())
+                elif self.path.startswith('/api/history'):
+                    self._json(200, server.history_dump(self.path))
                 elif self.path.startswith('/api/config'):
                     try:
                         self._json(200, {
