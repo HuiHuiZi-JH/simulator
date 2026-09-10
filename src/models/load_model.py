@@ -42,23 +42,30 @@ class LoadModel:
         logger.info(f"Loaded power curve from {self.csv_file}: {len(self.power_curve)} points, keys={sorted(self.power_curve.keys())[:5]}...")
 
     def interpolate_power(self, current_hour):
+        """Read the curve at `current_hour`, interpolated between its points.
+
+        The hour is used as given. An earlier version rounded it to the nearest
+        quarter -- the resolution the curve happens to be sampled at -- which
+        landed exactly on a curve point every time and turned a demand profile
+        into a staircase that only moved every 15 minutes. The value went to a
+        controller and onto the trend chart as a flat line beside curves that
+        were moving every second.
+        """
         if not self.power_curve:
             return 0.0
-        # 精确对齐 0.25 小时步长，使用 current_hour_display
-        rounded_hour = round(current_hour * 4) / 4
         times = sorted(self.power_curve.keys())
-        logger.debug(f"LoadModel interpolate: current_hour={current_hour:.4f}, rounded_hour={rounded_hour:.2f}, times={times[28:32]}...")  # 7:00 附近数据
-        if rounded_hour <= times[0]:
+        logger.debug(f"LoadModel interpolate: current_hour={current_hour:.4f}, times={times[28:32]}...")
+        if current_hour <= times[0]:
             return self.power_curve[times[0]]
-        if rounded_hour >= times[-1]:
+        if current_hour >= times[-1]:
             return self.power_curve[times[-1]]
         for i in range(len(times) - 1):
             t1, t2 = times[i], times[i + 1]
-            if abs(t1 - rounded_hour) < 0.01 or abs(t2 - rounded_hour) < 0.01:
-                return self.power_curve.get(rounded_hour, (self.power_curve[t1] + self.power_curve[t2]) / 2)
-            if t1 <= rounded_hour <= t2:
+            if t1 <= current_hour <= t2:
                 p1, p2 = self.power_curve[t1], self.power_curve[t2]
-                interpolated = p1 + (p2 - p1) * (rounded_hour - t1) / (t2 - t1)
+                if t2 == t1:
+                    return p1
+                interpolated = p1 + (p2 - p1) * (current_hour - t1) / (t2 - t1)
                 logger.debug(f"LoadModel interpolate: t1={t1:.2f}, t2={t2:.2f}, p1={p1}, p2={p2}, interpolated={interpolated}")
                 return interpolated
         return 0.0

@@ -139,7 +139,7 @@ their type is added to the file.
 | `PVModel` | `PV` | Follows a 24-hour irradiance curve from CSV, or a synthetic sin² arc 06:00–18:00 with ±5% noise. Output clamped to the written power limit. |
 | `BatteryModel` | `BESS` | Integrates a signed power command into SOC. On hitting the SOC ceiling or floor it back-calculates the energy actually absorbed, so the kWh counters stay honest. |
 | `EVModel` | `EV` | Draws rated power inside configured charging windows (midnight-wrapping supported), capped by the written setpoint, converted to balanced three-phase currents. |
-| `LoadModel` | `Load` | Replays a demand profile interpolated from CSV at quarter-hour resolution, or jitters 80–120% of base power. |
+| `LoadModel` | `Load` | Replays a demand profile from CSV, interpolated linearly *between* its points at whatever instant it is asked for, or jitters 80–120% of base power. |
 | `JTCLoadModel` | `JTCLoad` | The JTC common load — landlord and common services. Its own algorithm, sharing no code with `LoadModel`: an operator-supplied CSV read through `DayCurve`, linearly interpolated at any resolution and wrapped across midnight. No synthetic mode and no base power — the curve or nothing. |
 | `T7PVModel` | `T7PV` | Tower 7's PV plant, outside the Tower 10 network. The same direct `DayCurve` readout as the JTC common load, plus an integrated kWh total. No irradiance model, no synthetic arc, no curtailment input. |
 | `MeterModel` | `Meter` | **Derived.** Sums the other devices into net power at the point of common coupling, then integrates it on a monotonic clock into separate import and export counters. |
@@ -338,6 +338,14 @@ and fits whole overnight.
 
 It does not affect the virtual grid point: `VirtualGridModel` never reads `Load`, so the curve
 could not have double-counted into it whatever its values.
+
+`LoadModel` also used to round the clock to the nearest quarter hour before interpolating — the
+resolution its curve happens to be sampled at — so it landed exactly on a curve point every time
+and the T98 load stepped once every 15 minutes instead of moving. Beside the JTC common load,
+which moves every second, it read as a frozen value on unit 8 and drew a flat line on the trend
+chart. It now interpolates at the instant it is asked for, like every other curve in the
+simulator; `test/test_t98_load.py` pins that values one minute apart differ, while the sampled
+points still read exactly.
 
 `MeterModel` only sums the types it knows — `PV`, `BESS`, `EV`, `Load` — so the JTC common load
 having its own type is what keeps it out of the Tower 10 figure. Adding the virtual point changed

@@ -45,6 +45,22 @@ class ShippedT98Load(unittest.TestCase):
         night = min(self.m.power_curve[h] for h in (0.0, 1.0, 2.0, 3.0, 4.0, 5.0))
         self.assertGreater(T98_LOOP_LIMIT - night, PCS)
 
+    def test_load_moves_between_curve_points(self):
+        # It used to round the clock to the nearest quarter hour before
+        # interpolating -- landing on a curve point every time -- so the T98
+        # load was a staircase that only stepped every 15 minutes while every
+        # other device moved every second. A controller reading unit 8 saw a
+        # frozen value, and the trend chart drew a flat line.
+        inside = [self.m.interpolate_power(14.5 + i / 60.0) for i in range(0, 15, 3)]
+        self.assertEqual(len(set(inside)), len(inside))
+        # Monotone across a rising quarter-hour, and within its own endpoints.
+        self.assertEqual(inside, sorted(inside))
+        lo, hi = self.m.power_curve[14.5], self.m.power_curve[14.75]
+        self.assertTrue(all(min(lo, hi) <= v <= max(lo, hi) for v in inside))
+        # The sampled points themselves still read exactly.
+        for h in (0.0, 6.25, 14.5, 23.75):
+            self.assertAlmostEqual(self.m.interpolate_power(h), self.m.power_curve[h])
+
     def test_curve_is_a_plausible_day(self):
         vals = [self.m.interpolate_power(i / 4.0) for i in range(96)]
         self.assertTrue(all(v > 0 for v in vals))
