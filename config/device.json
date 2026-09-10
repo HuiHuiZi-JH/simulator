@@ -13,7 +13,7 @@
       "PV": [
         {
           "DeviceKey": "PV_01",
-          "ratedPower": 100,
+          "ratedPower": 52,
           "mode": 0,
           "csv_file": "pv_curve.csv",
           "slave_id": 2
@@ -25,8 +25,8 @@
         {
           "DeviceKey": "BESS_01",
           "ratedCapacity": 12000,
-          "maxChargePower": 9900,
-          "maxDischargePower": 9900,
+          "maxChargePower": 800,
+          "maxDischargePower": 800,
           "socMax": 100,
           "socMin": 0,
           "initial_soc": 0.5,
@@ -62,7 +62,7 @@
           "DeviceKey": "VGRID_01",
           "max_import": 1700,
           "bess_zero_export": 150,
-          "t98_loop_limit": 0,
+          "t98_loop_limit": 1750,
           "slave_id": 6
         }
       ]

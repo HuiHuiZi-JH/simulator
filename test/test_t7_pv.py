@@ -48,9 +48,10 @@ class ShippedCurve(unittest.TestCase):
         self.assertEqual(len(m.curve), 96)
         low, high = m.curve.span
         self.assertEqual(low, 0.0)                     # dark overnight
-        self.assertAlmostEqual(high, 150.0)
+        self.assertLessEqual(high, 240.0)              # Tower 7 plate rating
+        self.assertGreater(high, 150.0)                # and a real day under it
         self.assertAlmostEqual(m.interpolate(2.0), 0.0)
-        self.assertGreater(m.interpolate(13.0), 100.0)
+        self.assertGreater(m.interpolate(13.0), 150.0)
 
 
 if __name__ == '__main__':

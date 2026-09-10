@@ -25,3 +25,10 @@ dist/
 # Runtime logs
 log/
 config/device.json.bak
+
+# Source documents -- kept locally, never pushed. The CSVs in config/ are
+# derived from these; the documents themselves stay off GitHub.
+*.docx
+*.doc
+*.xlsx
+*.pdf

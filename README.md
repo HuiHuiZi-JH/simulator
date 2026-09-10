@@ -160,18 +160,20 @@ the part the controller owns, so the EGC is shown a *synthetic* measurement rath
 incoming meter:
 
 ```
-                 "Virtual" grid incoming
-        = Incoming - (T5 + T6 + T7 + Podium + Basement)
+              Calculated "JTC common load"  =  the EGC's grid reference
+   = Incoming - (T5 + T6 + T7 + Podium + Basement + T10)      recomputed every 2 s
                           |
 --------------------------+--------------------------  EGC control boundary
-   towers 5/6/7, podium and basement are pass-through and hidden from the loop
-   T7 PV can be simulated on its own, outside both measurements — no T7PV device is configured
+   every tenant feeder — towers 5/6/7, podium, basement AND tower 10 — is
+   subtracted out, so what is left is the landlord's own common services
+   T7 PV (240 kW) and T10 PV (52 kW) are netted inside those feeders, not controlled
           |                                   |
    JTC Common Load                      Tower 10 (T98)
-   landlord / common services           whole T98 load
-                                              |  T98 LV bus
-                                       +------+------+
-                                     BESS           Solar PV
+   landlord / common services           whole T98 tenant load
+   max import 1,700 kW                  transformer 2,500 kW, loop limit 1,750 kW
+   floor 150 kW                                |  T98 LV bus
+          |                            +-------+-------+
+          +-------- BESS 0.8 MW -------+            Solar PV 52 kW
 ```
 
 Two measurement points therefore exist, and they are deliberately independent:
@@ -184,12 +186,57 @@ Two measurement points therefore exist, and they are deliberately independent:
 `Meter_01` is the grid meter for the Tower 10 network: the T10 battery, inverter, charger and load
 are its terms and nothing else. `T7PV` and `JTCLoad` are in neither sum. The shipped config has no
 charger, so unit 1 currently reads `Load - PV + BESS`; `MeterModel` still sums the `EV` type and
-picks one up unchanged if it is added back.
+picks one up unchanged if it is added back. This is the meter the EGC's **multi-loop** runs its
+second control loop on, against the 1,750 kW limit.
 
-The virtual point is `JTC common load + BESS`: the JTC common load figure already contains Tower
-10's own demand, so T98 is not added a second time, and the battery is the one element under
-Tower 10 that moves the virtual import on its own. Battery charging (+) pushes the virtual import
-up, discharging (-) pulls it down.
+The virtual point is `JTC common load + BESS`. Tower 10's own demand is **not** in it: the
+submission's formula subtracts the T10 feeder along with every other tenant feeder, so what
+survives the subtraction is the landlord's common services and nothing else. The battery is added
+because it is what the loop dispatches — Figure 2 of the submission puts the common-services load
+and the BESS behind the virtual node. Battery charging (+) pushes the virtual import up,
+discharging (-) pulls it down, which is the whole mechanism of use-cases 1 and 2.
+
+### Site data — where these numbers come from
+
+The plant ratings, the three limits and the shape of all four curves come from **"BESS Charging /
+Discharging Control Logic — CC2&3", design document v1.2, dated 25/08/2026**, plus the Electrical
+SLD v2.0 it cites.
+
+**That document is not in this repository and must not be pushed to it.** `.gitignore` refuses
+`*.docx`, `*.doc`, `*.xlsx` and `*.pdf` so it cannot be committed by accident — keep your copy
+locally. What the repository carries instead is everything derived from it: the anchors and limits
+at the top of `utils/make_curves.py`, the settings in `device.json`, and this section.
+
+What was taken from it:
+
+| | Value |
+|---|---|
+| BESS PCS | 800 kW, connected at Tower 10 (T98) |
+| Rooftop PV | 240 kW at Tower 7, 52 kW at Tower 10 — netted inside the metered feeders, not separately controlled |
+| T98 transformer | 2,500 kW rated; multi-loop limit 1,750 kW (70%) |
+| Maximum import | 1,700 kW on the calculated JTC common load |
+| Power margin | 5% — control acts from 1,615 kW |
+| BESS zero-export offset | 150 kW, set directly (not a live percentage) |
+| Control cycle | 2 s |
+| JTC common load | Incoming − (T5 + T6 + T7 + Podium + Basement + T10) |
+
+The control strategy itself is **not** implemented here and is not meant to be: all three
+use-cases are existing EGC functions configured through its HMI (Static Demand Management, BESS
+Zero Export, Multi-loop). This simulator's side of that split is to present a site that reaches
+every limit, so the strategy has something to act on.
+
+Three things the document leaves open, carried here as they are rather than guessed:
+
+- **BESS energy capacity is not stated** — only the 800 kW PCS. `ratedCapacity` stays at its
+  pre-existing 12,000 kWh, which at 800 kW is a 15-hour battery and will barely move SOC across a
+  day. If the real figure is nearer 1,600 kWh, say so and it is a one-line change.
+- **Where the BESS sits relative to the T10 feeder meter.** If it is behind the meter that the
+  common-load calculation subtracts, the calculation would subtract the battery's own action and
+  the loop could not see it. The simulator follows Figure 2 — the BESS is behind the virtual node
+  and moves it — which is the only reading under which use-cases 1 and 2 function.
+- **The 2 s control cycle** is the EGC's, not the simulator's: models tick once a second and the
+  trend ring samples every ten. Nothing here needs to match it, but a controller under test will
+  see values that are at most one second stale.
 
 ### Shipped device set
 
@@ -270,22 +317,27 @@ Configure it with nothing but its curve:
 ```
 
 To use your own profile, drop the file in `config/` and point `csv_file` at it — or give an
-absolute path — then restart. `config/jtc_common_curve.csv` is a worked example, not a fixture the
-code depends on; the shipped one runs in the **100–200 kW** band.
+absolute path — then restart. `config/jtc_common_curve.csv` is generated from the design basis by
+`utils/make_curves.py`, not a fixture the code depends on; the shipped one runs from **183 kW
+overnight to 1,837 kW** at the afternoon peak, crossing the 1,700 kW import limit on the way.
 
 Tower 7's PV reads its curve exactly the same way — both go through `DayCurve` in
 `src/models/curve.py`, which is shared only between these two operator-fed devices. The older
 models keep their own loaders; nothing about them changed.
 
-**The `Load` device under Tower 10 ships with an all-zero curve.** T98's demand is already carried
-by the JTC common load figure above the boundary, so the site is fully represented without it, and
-`LOAD_001` is left flat rather than restating demand that is already accounted for.
+**The `Load` device carries the Tower 10 tenant load.** It shipped as an all-zero curve for a
+while, on the reasoning that T98's demand was already inside the JTC common load figure. The
+submission says otherwise: the T10 feeder is one of the six subtracted from the incoming meter, so
+the common figure never contained it, and a zero curve was simply a missing tower.
 
-This only changes what `Meter_01` reports — with the curve at zero the Tower 10 point reads
-`EV + BESS - PV`, so it shows PV export whenever nothing local is drawing. It does not affect the
-virtual grid point at all: `VirtualGridModel` never reads `Load`, so the curve could not have
-double-counted into it whatever its values. The device stays in place — it is the T98 load point,
-and it is where a real profile belongs once T98's own metering is available.
+It is not a cosmetic gap. The EGC's third use-case caps charging at `1,750 kW - T98 load`, so with
+the tower at zero the cap can never bind and the multi-loop cannot be tested at all. The curve now
+runs a working day peaking at about 1,540 kW, which leaves ~206 kW of headroom at the afternoon
+peak — a full 800 kW charge request has to be cut back for around nine and a half hours of the day,
+and fits whole overnight.
+
+It does not affect the virtual grid point: `VirtualGridModel` never reads `Load`, so the curve
+could not have double-counted into it whatever its values.
 
 `MeterModel` only sums the types it knows — `PV`, `BESS`, `EV`, `Load` — so the JTC common load
 having its own type is what keeps it out of the Tower 10 figure. Adding the virtual point changed
@@ -305,12 +357,20 @@ the off-loop devices present, that an arbitrarily large JTC common load does not
 a virtual grid update leaves every other device's registers untouched.
 `test/test_jtc_load.py` covers the common-load curve reader: header detection, comments and blank
 lines, midnight wrapping, that a missing or empty file raises rather than falling back, and that
-the shipped curve stays inside its 100–200 kW band at every interpolated instant, not just at the
-sampled points. `test/test_t7_pv.py` does the same for Tower 7, and the isolation suite asserts
-that 150 kW of T7 generation moves neither the Tower 10 meter nor the virtual grid point.
+the shipped curve reaches the limits it has to reach (below). `test/test_t7_pv.py` does the same
+for Tower 7, and the isolation suite asserts that 150 kW of T7 generation moves neither the Tower
+10 meter nor the virtual grid point.
 `test/test_history.py` covers the rolling ring behind the trend chart: that it stays bounded, that
 an incremental read joins up with what a browser already holds, and that a late tick takes its
 sample without shifting the cadence of the ones after it.
+
+The curve tests assert the **design basis**, not arbitrary bands, because a curve that never
+approaches a limit would leave the EGC strategy untestable while looking perfectly healthy:
+`test_jtc_load.py` pins that the common load crosses 1,700 kW by an excursion the 800 kW PCS can
+cover, that its minimum stays above the 150 kW floor but within reach of it, and that the 5% margin
+line is crossed in both directions. `test_t98_load.py` pins that the Tower 10 peak leaves less than
+800 kW under the multi-loop limit — so a full charge request must be cut back — while the overnight
+trough leaves more, so a time-of-use plan can still fill the battery.
 
 ### The three static settings
 
@@ -318,16 +378,21 @@ The EGC regulates the virtual site with three fixed limits. The simulator publis
 registers on the virtual grid device so a controller reads the limits it is meant to respect
 instead of carrying its own copy:
 
-| Setting | Register | Default |
-|---|---|---|
-| Maximum import | `VG.MaxImport` | 1,700 kW |
-| BESS zero-export threshold | `VG.BessZeroExport` | 150 kW |
-| Tower 10 loop limit | `VG.T98LoopLimit` | `0` — **not yet supplied by JTC**, set it in `device.json` when the figure is known |
+| Setting | Register | Value | Source |
+|---|---|---|---|
+| Maximum import | `VG.MaxImport` | 1,700 kW | Static Demand Management, requirement 1 |
+| BESS zero-export threshold | `VG.BessZeroExport` | 150 kW | BESS Zero Export relative offset, requirement 2 |
+| Tower 10 loop limit | `VG.T98LoopLimit` | 1,750 kW | Multi-loop on the T98 meter — 70% of the 2,500 kW transformer, requirement 3 |
 
-They are configuration, not physics: nothing in the simulator enforces them. Exceeding the import
-cap is exactly the condition a controller under test is supposed to detect and correct — with the
-shipped 100–200 kW common-load curve, the battery is what gets there: commanding about 1,500 kW of
-charge at the afternoon peak puts the virtual point over 1,700 kW.
+They are configuration, not physics: **nothing in the simulator enforces them.** That is the
+division of labour — the limits are what the EGC strategy is written against, and this simulator's
+job is to present a site that reaches them. With the shipped curves it does so on its own: the
+common load crosses 1,700 kW for about two hours in the early afternoon without the battery doing
+anything at all.
+
+A fourth EGC setting, the **5% power margin** (control acts from 1,615 kW), is not published as a
+register. Say the word and it becomes `VG.PowerMargin` at offset 12, on the same reasoning as the
+other three — that a controller should read the limits rather than carry its own copy.
 
 ---
 
@@ -613,7 +678,7 @@ each one is and why nothing else is there.
   "Devices": [
     { "PV": [ {
         "DeviceKey":  "PV_01",
-        "ratedPower": 100,
+        "ratedPower": 52,
         "mode":       0,
         "csv_file":   "pv_curve.csv",
         "slave_id":   2
@@ -660,18 +725,35 @@ midnight point — see Known issues.
 
 `jtc_common_curve.csv` and `t7_pv_curve.csv` are read through `DayCurve`, not by the loaders
 above, so they follow the looser rules described under Site model — header optional, any
-resolution, midnight wrap. Both are examples to replace with real data:
+resolution, midnight wrap.
+
+All four are **generated**, not hand-typed — `python3 utils/make_curves.py` rewrites them from the
+design basis recorded at the top of that script. Edit the anchors there rather than the CSVs, so
+the reasoning stays with the numbers:
 
 | File | Shape | Range |
 |---|---|---|
-| `jtc_common_curve.csv` | landlord common-services day — flat overnight, ramping from 06:00 to an early-afternoon plateau, falling away through the evening | 102–200 kW |
-| `t7_pv_curve.csv` | solar day — dark until about 06:45, peaking early afternoon, dark again by 19:30 | 0–150 kW |
+| `jtc_common_curve.csv` | the EGC's grid reference — overnight base, ramping from 06:00, crossing 1,700 kW from about 13:20 to 15:30, falling away through the evening | 183–1,837 kW |
+| `load_curve.csv` | Tower 10 tenant day behind the 2,500 kW transformer | 240–1,544 kW |
+| `t7_pv_curve.csv` | Tower 7 rooftop solar day, 07:00–19:00, 240 kW rated | 0–205 kW |
+| `pv_curve.csv` | Tower 10 rooftop solar, same day shape, 52 kW rated | 0–45 kW |
+
+Each one is shaped so a use-case is reachable, and the generator prints the proof when it runs:
+
+```
+use-case 1  common load over 1700 kW for 2.00 h, peak 1837.1 kW (excursion 137.1 kW)
+use-case 2  common load minimum 183.0 kW, 33.0 kW of discharge headroom over the 150 kW floor
+use-case 3  T98 peak 1543.9 kW leaves 206.1 kW under the 1750 kW multi-loop limit
+```
+
+The excursion above the import limit is 137 kW against an 800 kW PCS, so the battery can hold the
+limit with room to spare; the overnight minimum leaves 33 kW of discharge headroom over the floor,
+so a night discharge runs into the floor instead of never approaching it.
 
 `t7_pv_curve.csv` is kept even though no `T7PV` device is configured — it is the curve that device
 reads, and removing it would make adding one back a two-file job instead of a one-object edit.
 
-`load_curve.csv` is all zeros, deliberately — see Site model above for why. Put a T98 profile in
-it and the Tower 10 meter picks it up on the next restart; nothing else needs changing.
+`load_curve.csv` is the Tower 10 tenant load — see Site model above for why it is no longer zero.
 
 ### `config/logging_config.json`
 
@@ -692,12 +774,13 @@ When a client sees a value it did not expect, the traffic log has the bytes.
 - **`src/models/ev_model.py` is ISO-8859 encoded, not UTF-8.** The Chinese comments on lines 62
   and 70 render as `���`, and tools such as `grep` treat the file as binary and skip it. Needs
   re-encoding to UTF-8.
-- **Both CSV loaders discard the first data row.** `PVModel.load_power_curve` and
-  `LoadModel.load_power_curve` call `next(reader, None)` to skip a header, but `pv_curve.csv` and
-  `load_curve.csv` have none — they start directly at `0.0,0.0`. Both files run `0.0` to `24.0`
-  inclusive, so 96 of their 97 points survive, but the one discarded is midnight. Impact is small
-  because both interpolators clamp below `times[0]`. `jtc_common_curve.csv` ships with a header
-  row and is unaffected.
+- ~~**Both CSV loaders discard the first data row.**~~ **Fixed by the data, not the code.**
+  `PVModel.load_power_curve` and `LoadModel.load_power_curve` still call `next(reader, None)` to
+  skip a header, and `pv_curve.csv` and `load_curve.csv` used to have none — so midnight was
+  thrown away. `utils/make_curves.py` now writes a `hour,kW` header on all four files, so all 97
+  points survive. The loaders are unchanged and still *require* that header:
+  `test/test_t98_load.py` asserts both curves load 97 points including `0.0`, so a regenerated
+  file that lost its header fails a test instead of silently dropping a point.
 - **`config/deviceLogic.conf` is empty** and currently unread by any code.
 
 ---
@@ -709,15 +792,17 @@ main.py                          entry point, threads, tick loop
 test/
   test_history.py                the rolling power ring behind the trend chart
   test_isolation.py              the Tower 10 loop is unaffected by the virtual point
+  test_t98_load.py               the Tower 10 load and PV curves, and their headers
   test_jtc_load.py               the JTC common load curve reader
   test_t7_pv.py                  the Tower 7 PV curve reader
 config/
   device.json                    site definition
   modbus_registers.py            point name → register offset
   logging_config.json            log levels and files
-  pv_curve.csv, load_curve.csv   24h power profiles
-  jtc_common_curve.csv           24h JTC common load profile
-  t7_pv_curve.csv                24h Tower 7 PV profile
+  pv_curve.csv                   24h Tower 10 rooftop PV, 52 kW
+  load_curve.csv                 24h Tower 10 tenant load
+  jtc_common_curve.csv           24h JTC common load — the EGC grid reference
+  t7_pv_curve.csv                24h Tower 7 PV, 240 kW
 src/
   history.py                     rolling power ring the trend chart reads
   communication/modbus_server.py Modbus TCP server
@@ -729,6 +814,7 @@ web/
 utils/
   config_loader.py               JSON loader
   locks.py                       the shared data_lock
+  make_curves.py                 regenerates all four CSVs from the design basis
 introduction.html                illustrated overview of the system
 JTC_Archi_Diagram.png            the site architecture this simulator stands in for
 MicroGridSimulator.service       systemd unit
