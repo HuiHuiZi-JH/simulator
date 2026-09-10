@@ -325,19 +325,27 @@ Tower 7's PV reads its curve exactly the same way — both go through `DayCurve`
 `src/models/curve.py`, which is shared only between these two operator-fed devices. The older
 models keep their own loaders; nothing about them changed.
 
-**The `Load` device carries the Tower 10 tenant load.** It shipped as an all-zero curve for a
-while, on the reasoning that T98's demand was already inside the JTC common load figure. The
-submission says otherwise: the T10 feeder is one of the six subtracted from the incoming meter, so
-the common figure never contained it, and a zero curve was simply a missing tower.
+**The `Load` device ships an all-zero curve — only the JTC common load is simulated.** That is an
+operator decision, and `utils/make_curves.py` holds it as one switch, `T98_LOAD_ZERO = True`. The
+Tower 10 anchors sit right beside it, so restoring a real tenant day is a one-line edit and a
+regenerate.
 
-It is not a cosmetic gap. The EGC's third use-case caps charging at `1,750 kW - T98 load`, so with
-the tower at zero the cap can never bind and the multi-loop cannot be tested at all. The curve now
-runs a working day peaking at about 1,540 kW, which leaves ~206 kW of headroom at the afternoon
-peak — a full 800 kW charge request has to be cut back for around nine and a half hours of the day,
-and fits whole overnight.
+An earlier version of this file justified the zero curve differently — that T98's demand was
+already inside the JTC common load figure. That reasoning was **wrong** and is worth recording so
+it is not repeated: the submission subtracts the T10 feeder along with every other tenant feeder,
+so the common figure never contained Tower 10 at all. The curve is zero because nobody asked for
+Tower 10 to be simulated, not because it is accounted for elsewhere.
 
-It does not affect the virtual grid point: `VirtualGridModel` never reads `Load`, so the curve
-could not have double-counted into it whatever its values.
+What zero costs, recorded so the gap is a known one:
+
+- **Use-case 3 cannot be exercised.** The EGC caps charging at `1,750 kW - T98 load`; at zero load
+  the whole 800 kW PCS always fits, so the multi-loop limit never binds.
+- **`Meter_01` reads `BESS - PV`**, so unit 1 shows PV export whenever the battery is idle. That is
+  arithmetic, not a fault.
+
+What it does *not* touch is the figure the EGC regulates. `VirtualGridModel` never reads `Load`, so
+the JTC common load and the virtual grid point are `JTCLoad + BESS` and nothing else — units 9 and
+6 are identical whatever Tower 10 does. Use-cases 1 and 2 are unaffected.
 
 `LoadModel` also used to round the clock to the nearest quarter hour before interpolating — the
 resolution its curve happens to be sampled at — so it landed exactly on a curve point every time
@@ -376,9 +384,10 @@ The curve tests assert the **design basis**, not arbitrary bands, because a curv
 approaches a limit would leave the EGC strategy untestable while looking perfectly healthy:
 `test_jtc_load.py` pins that the common load crosses 1,700 kW by an excursion the 800 kW PCS can
 cover, that its minimum stays above the 150 kW floor but within reach of it, and that the 5% margin
-line is crossed in both directions. `test_t98_load.py` pins that the Tower 10 peak leaves less than
-800 kW under the multi-loop limit — so a full charge request must be cut back — while the overnight
-trough leaves more, so a time-of-use plan can still fill the battery.
+line is crossed in both directions. `test_t98_load.py` pins that the shipped Tower 10 curve is zero all day and
+that this leaves the multi-loop cap unreachable — the consequence is asserted rather than left to
+be discovered — and covers `LoadModel`'s interpolation against a fixture of its own, so the model
+stays tested whichever way `T98_LOAD_ZERO` is set.
 
 ### The three static settings
 
@@ -742,7 +751,7 @@ the reasoning stays with the numbers:
 | File | Shape | Range |
 |---|---|---|
 | `jtc_common_curve.csv` | the EGC's grid reference — overnight base, ramping from 06:00, crossing 1,700 kW from about 13:20 to 15:30, falling away through the evening | 183–1,837 kW |
-| `load_curve.csv` | Tower 10 tenant day behind the 2,500 kW transformer | 240–1,544 kW |
+| `load_curve.csv` | Tower 10 tenant load — **all zero**, see Site model; the day is one switch away | 0 kW |
 | `t7_pv_curve.csv` | Tower 7 rooftop solar day, 07:00–19:00, 240 kW rated | 0–205 kW |
 | `pv_curve.csv` | Tower 10 rooftop solar, same day shape, 52 kW rated | 0–45 kW |
 
@@ -751,7 +760,8 @@ Each one is shaped so a use-case is reachable, and the generator prints the proo
 ```
 use-case 1  common load over 1700 kW for 2.00 h, peak 1837.1 kW (excursion 137.1 kW)
 use-case 2  common load minimum 183.0 kW, 33.0 kW of discharge headroom over the 150 kW floor
-use-case 3  T98 peak 1543.9 kW leaves 206.1 kW under the 1750 kW multi-loop limit
+use-case 3  NOT reachable — the Tower 10 load is zero, so the 1750 kW multi-loop
+            cap has nothing to bind against. Set T98_LOAD_ZERO = False to restore it.
 ```
 
 The excursion above the import limit is 137 kW against an 800 kW PCS, so the battery can hold the
@@ -761,7 +771,7 @@ so a night discharge runs into the floor instead of never approaching it.
 `t7_pv_curve.csv` is kept even though no `T7PV` device is configured — it is the curve that device
 reads, and removing it would make adding one back a two-file job instead of a one-object edit.
 
-`load_curve.csv` is the Tower 10 tenant load — see Site model above for why it is no longer zero.
+`load_curve.csv` is all zeros — see Site model above for why, and for what that costs.
 
 ### `config/logging_config.json`
 
@@ -800,7 +810,7 @@ main.py                          entry point, threads, tick loop
 test/
   test_history.py                the rolling power ring behind the trend chart
   test_isolation.py              the Tower 10 loop is unaffected by the virtual point
-  test_t98_load.py               the Tower 10 load and PV curves, and their headers
+  test_t98_load.py               the zero Tower 10 curve, load interpolation, T10 PV
   test_jtc_load.py               the JTC common load curve reader
   test_t7_pv.py                  the Tower 7 PV curve reader
 config/

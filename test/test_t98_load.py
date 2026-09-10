@@ -1,15 +1,18 @@
 # -*- coding: utf-8 -*-
-"""The Tower 10 (T98) tenant load curve, and the header both older loaders need.
+"""The Tower 10 (T98) load curve, and the header both older loaders need.
 
 `LoadModel` and `PVModel` discard their first row as a header. Their curves used
 to have none, so midnight was silently thrown away; the generated files carry
 `hour,kW` now, and these tests pin that -- a regenerated file that lost its
 header would drop a point without failing anything else.
 
-The band assertions are the precondition for the EGC's third use-case: the
-charge cap is 1,750 kW minus the T98 load, so a day that never loads the tower
-would never exercise it.
+The shipped `load_curve.csv` is all zeros by operator decision: only the JTC
+common load is simulated. The interpolation tests therefore run against their
+own fixture, not the shipped file, so the model stays covered whichever way the
+generator's T98_LOAD_ZERO switch is set.
 """
+import os
+import tempfile
 import unittest
 
 from src.models.load_model import LoadModel
@@ -29,42 +32,61 @@ class ShippedT98Load(unittest.TestCase):
         self.assertEqual(len(self.m.power_curve), 97)
         self.assertIn(0.0, self.m.power_curve)
         self.assertIn(24.0, self.m.power_curve)
-        # The day joins up: the closing point matches the opening one.
-        self.assertAlmostEqual(self.m.power_curve[0.0], self.m.power_curve[24.0])
 
-    def test_peak_leaves_less_headroom_than_the_pcs_can_use(self):
-        # Use-case 3 only means something if a full 800 kW charge request has
-        # to be cut back at some point in the day.
+    def test_shipped_curve_is_zero_all_day(self):
+        # Deliberate: the Tower 10 tenant load is not simulated, so unit 8
+        # reads a flat zero and Meter_01 carries only PV and the battery. If
+        # this ever fails, someone regenerated with T98_LOAD_ZERO = False --
+        # which is a decision, not an accident, so update this test with it.
+        self.assertEqual(set(self.m.power_curve.values()), {0.0})
+        for i in range(0, 2400, 7):
+            self.assertEqual(self.m.interpolate_power(i / 100.0), 0.0)
+
+    def test_zero_load_leaves_the_multi_loop_cap_unreachable(self):
+        # Recorded as a consequence rather than a defect: the EGC caps charging
+        # at 1,750 kW minus the T98 load, so at zero the whole PCS always fits
+        # and use-case 3 never binds.
         peak = max(self.m.power_curve.values())
-        self.assertLess(T98_LOOP_LIMIT - peak, PCS)
-        self.assertLess(peak, T98_LOOP_LIMIT)      # the tower alone never trips it
+        self.assertGreater(T98_LOOP_LIMIT - peak, PCS)
 
-    def test_overnight_leaves_room_for_the_whole_pcs(self):
-        # ...and charging must still be possible at night, or a time-of-use
-        # plan could never fill the battery.
-        night = min(self.m.power_curve[h] for h in (0.0, 1.0, 2.0, 3.0, 4.0, 5.0))
-        self.assertGreater(T98_LOOP_LIMIT - night, PCS)
 
-    def test_load_moves_between_curve_points(self):
-        # It used to round the clock to the nearest quarter hour before
-        # interpolating -- landing on a curve point every time -- so the T98
-        # load was a staircase that only stepped every 15 minutes while every
-        # other device moved every second. A controller reading unit 8 saw a
-        # frozen value, and the trend chart drew a flat line.
+class LoadInterpolation(unittest.TestCase):
+    """Pins the fix for the quarter-hour staircase, on a curve of its own.
+
+    LoadModel used to round the clock to the nearest quarter hour before
+    interpolating. Its curves are sampled at exactly that resolution, so the
+    rounded hour always landed on a curve point: the load held one value for 15
+    minutes and then jumped, and the interpolation branch never ran.
+    """
+
+    def setUp(self):
+        fd, self.path = tempfile.mkstemp(suffix='.csv', dir='config')
+        with os.fdopen(fd, 'w') as f:
+            f.write('hour,kW\n')
+            for i in range(97):
+                f.write('%.2f,%.1f\n' % (i * 0.25, 100.0 + i * 10.0))
+        self.m = LoadModel({'DeviceKey': 'L', 'base_power': 50, 'mode': 0,
+                            'csv_file': os.path.basename(self.path)}, 0.0)
+
+    def tearDown(self):
+        os.unlink(self.path)
+
+    def test_moves_between_curve_points(self):
         inside = [self.m.interpolate_power(14.5 + i / 60.0) for i in range(0, 15, 3)]
-        self.assertEqual(len(set(inside)), len(inside))
-        # Monotone across a rising quarter-hour, and within its own endpoints.
-        self.assertEqual(inside, sorted(inside))
-        lo, hi = self.m.power_curve[14.5], self.m.power_curve[14.75]
-        self.assertTrue(all(min(lo, hi) <= v <= max(lo, hi) for v in inside))
-        # The sampled points themselves still read exactly.
-        for h in (0.0, 6.25, 14.5, 23.75):
+        self.assertEqual(len(set(inside)), len(inside))     # no staircase
+        self.assertEqual(inside, sorted(inside))            # and monotone with the ramp
+
+    def test_sampled_points_still_read_exactly(self):
+        for h in (0.0, 6.25, 14.5, 23.75, 24.0):
             self.assertAlmostEqual(self.m.interpolate_power(h), self.m.power_curve[h])
 
-    def test_curve_is_a_plausible_day(self):
-        vals = [self.m.interpolate_power(i / 4.0) for i in range(96)]
-        self.assertTrue(all(v > 0 for v in vals))
-        self.assertGreater(max(vals), 4 * min(vals))   # a working day, not a flat line
+    def test_midpoint_is_the_average_of_its_neighbours(self):
+        self.assertAlmostEqual(self.m.interpolate_power(14.625),
+                               (self.m.power_curve[14.5] + self.m.power_curve[14.75]) / 2)
+
+    def test_clamps_outside_the_curve(self):
+        self.assertEqual(self.m.interpolate_power(-1.0), self.m.power_curve[0.0])
+        self.assertEqual(self.m.interpolate_power(30.0), self.m.power_curve[24.0])
 
 
 class ShippedT10PV(unittest.TestCase):

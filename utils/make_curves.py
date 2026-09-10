@@ -56,6 +56,17 @@ JTC_ANCHORS = [
     (22.0, 420), (23.0, 320), (24.0, 240),
 ]
 
+# The Tower 10 tenant load is shipped as ZERO by operator decision -- only the
+# JTC common load is to be simulated. Flip this to False to write the day below
+# instead; nothing else needs changing, and the anchors are kept precisely so
+# that reversal stays a one-line edit.
+#
+# What zero costs: the EGC's third use-case caps charging at 1,750 kW minus the
+# T98 load, so with the tower at zero that cap can never bind and the multi-loop
+# cannot be exercised. Meter_01 also reads BESS - PV, showing PV export whenever
+# the battery is idle.
+T98_LOAD_ZERO = True
+
 # Tower 10 (T98) tenant load, behind the 2,500 kW transformer. Its working-hours
 # peak leaves about 190 kW of headroom under the 1,750 kW multi-loop limit, so a
 # BESS asking for its full 800 kW at that hour must be cut back (use-case 3),
@@ -164,14 +175,18 @@ def main():
     clamping = wrapping + [24.0]                                  # + closing point
 
     jtc = build(JTC_ANCHORS, wrapping, 9.0, 1.7)
-    t98 = build(T98_ANCHORS, clamping, 11.0, 0.9)
-    t98[-1] = t98[0]
+    if T98_LOAD_ZERO:
+        t98 = [0.0] * len(clamping)
+    else:
+        t98 = build(T98_ANCHORS, clamping, 11.0, 0.9)
+        t98[-1] = t98[0]
     t7 = build_solar(T7_PEAK, T7_RATED, wrapping, 7.0, 2.3)
     t10 = build_solar(T10_PEAK, T10_RATED, clamping, 1.6, 3.1)
     t10[-1] = t10[0]
 
     write('jtc_common_curve.csv', wrapping, jtc, 'JTC common load (EGC grid reference)')
-    write('load_curve.csv', clamping, t98, 'Tower 10 / T98 tenant load')
+    write('load_curve.csv', clamping, t98,
+          'Tower 10 / T98 tenant load' + (' — zeroed by operator decision' if T98_LOAD_ZERO else ''))
     write('t7_pv_curve.csv', wrapping, t7, 'Tower 7 rooftop PV, 240 kW rated')
     write('pv_curve.csv', clamping, t10, 'Tower 10 rooftop PV, 52 kW rated')
 
@@ -184,13 +199,18 @@ def main():
           % (MAX_IMPORT * (1 - MARGIN)))
     print('use-case 2  common load minimum %.1f kW, %.1f kW of discharge headroom over the %.0f kW floor'
           % (min(jtc), min(jtc) - FLOOR, FLOOR))
-    print('use-case 3  T98 peak %.1f kW leaves %.1f kW under the %.0f kW multi-loop limit,'
-          % (max(t98), T98_LOOP - max(t98), T98_LOOP))
-    print('            so a %.0f kW charge request must be cut back for %.2f h of the day'
-          % (PCS, sum(STEP for v in t98 if T98_LOOP - v < PCS)))
-    night = min(t98)
-    print('            overnight T98 %.1f kW leaves %.1f kW, the whole PCS fits'
-          % (night, T98_LOOP - night))
+    if T98_LOAD_ZERO:
+        print('use-case 3  NOT reachable — the Tower 10 load is zero, so the %.0f kW multi-loop'
+              % T98_LOOP)
+        print('            cap has nothing to bind against. Set T98_LOAD_ZERO = False to restore it.')
+    else:
+        print('use-case 3  T98 peak %.1f kW leaves %.1f kW under the %.0f kW multi-loop limit,'
+              % (max(t98), T98_LOOP - max(t98), T98_LOOP))
+        print('            so a %.0f kW charge request must be cut back for %.2f h of the day'
+              % (PCS, sum(STEP for v in t98 if T98_LOOP - v < PCS)))
+        night = min(t98)
+        print('            overnight T98 %.1f kW leaves %.1f kW, the whole PCS fits'
+              % (night, T98_LOOP - night))
 
 
 if __name__ == '__main__':
