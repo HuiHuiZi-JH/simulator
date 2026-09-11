@@ -526,7 +526,8 @@ Configure it with nothing but its curve:
 ```
 
 To use your own profile, drop the file in `config/` and point `csv_file` at it — or give an
-absolute path — then restart. `config/jtc_common_curve.csv` is generated from the design basis by
+absolute path, or upload it from the dashboard's configuration tab, which does the same thing
+without a shell — then restart. `config/jtc_common_curve.csv` is generated from the design basis by
 `utils/make_curves.py`, not a fixture the code depends on; the shipped one runs from **183 kW
 overnight to 1,837 kW** at the afternoon peak, crossing the 1,700 kW import limit on the way.
 
@@ -588,6 +589,11 @@ for Tower 7, and the isolation suite asserts that 150 kW of T7 generation moves 
 `test/test_history.py` covers the rolling ring behind the trend chart: that it stays bounded, that
 an incremental read joins up with what a browser already holds, and that a late tick takes its
 sample without shifting the cadence of the ones after it.
+`test/test_curve_upload.py` covers the one path where a file the models depend on arrives from
+outside the repository: that an upload lands in `config/` and nowhere else however it is named,
+that what the dashboard accepts is exactly what `DayCurve` then reads back, that an unusable or
+oversized file is refused without being written, and that an existing curve is replaced only when
+replacement is asked for.
 
 The curve tests assert the **design basis**, not arbitrary bands, because a curve that never
 approaches a limit would leave the EGC strategy untestable while looking perfectly healthy:
@@ -719,6 +725,15 @@ and a link can point at one.
 device's fields, including EV charging windows. Devices can be added and removed. Saving is
 validated before anything is written, and rejected saves leave the file untouched.
 
+**Curve fields take an upload.** Every `csv_file` field is a text box plus an **Upload CSV…**
+button. The text box still accepts anything the model does — a name in `config/`, or an absolute
+path to a file the operator keeps elsewhere — and offers the curves already in `config/` as
+suggestions; under it, a line says how many points the named curve has and the range it covers, or
+that no such file is there yet. Uploading sends the file to `POST /api/curve`, which writes it into
+`config/` and fills the field in with its name. An upload does not touch `device.json`: the field
+is set in the form and saved with everything else, so an upload the operator changes their mind
+about is discarded with **Discard changes** like any other edit.
+
 **Match local time on start** keeps the simulated clock aligned to this machine's local time. Leave
 it on so that every restart after a configuration change resumes at the current time; uncheck it
 only to pin the simulation to a fixed hour.
@@ -740,6 +755,8 @@ Restarting re-reads `device.json` and resets SOC, energy counters, and the simul
 | `POST` | `/api/control` | Write one control register |
 | `GET` | `/api/config` | Current `device.json`, the editable field schema, and the restart flag |
 | `POST` | `/api/config` | Validate and write `device.json` |
+| `GET` | `/api/curves` | The readable day curves in `config/`, with point count and range |
+| `POST` | `/api/curve` | Validate an uploaded day curve and write it into `config/` |
 | `POST` | `/api/restart` | Restart the simulator in place |
 
 `/api/history` answers with the sample interval and span, a sequence counter, the simulated hour of
@@ -787,9 +804,38 @@ Writes are atomic — the new file goes to `device.json.tmp` and is swapped in w
 an interrupted save can never leave a truncated `device.json`. The previous version is kept as
 `config/device.json.bak` (gitignored).
 
+### Uploading a curve safely
+
+`POST /api/curve` takes `{"name": "my_load.csv", "content": "hour,kW\n0,183\n...", "overwrite": false}`
+and applies four checks before anything reaches disk:
+
+- **The name is a plain file name.** It must match `[A-Za-z0-9][A-Za-z0-9._-]*\.csv`, and only the
+  base name is used, so `../device.json` is refused and `/etc/passwd.csv` becomes
+  `config/passwd.csv`. An upload cannot write outside `config/` whatever it is called.
+- **The file is a day curve.** It is parsed by `parse_points` in `src/models/curve.py` — the same
+  reader `DayCurve` uses, not a second laxer one — so a file the dashboard accepts cannot fail when
+  the simulator restarts. A file with no usable `hour,value` row is refused, with the reason.
+- **The file is curve-sized.** Over 1 MB is refused, and a request whose `Content-Length` is over
+  2 MB is refused before the body is read at all.
+- **An existing curve is only replaced when asked.** Re-using a name answers `409` with
+  `exists: true`; the dashboard asks the operator and retries with `overwrite: true`. This is what
+  keeps a stray upload from quietly replacing `jtc_common_curve.csv`.
+
+The write goes through `<name>.csv.tmp` and `os.replace`, like `device.json`, so an interrupted
+upload can never leave a truncated curve where a good one was. There is no `.bak` for curves: the
+generated ones are rebuilt by `python3 utils/make_curves.py`, and an uploaded one is a file the
+operator holds the original of.
+
+Uploading does not change the running simulation any more than saving does. The curve is read when
+the simulator restarts — including a curve uploaded over the name a device already points at.
+
+**An upload over a generated name is temporary.** `make_curves.py` rewrites all four shipped CSVs
+from the design basis; uploading your own `jtc_common_curve.csv` and later regenerating will
+overwrite it. Upload under a name of your own to keep the two apart.
+
 The dashboard polls `/api/state` once a second. It is not authenticated and binds `0.0.0.0`; keep
 it on a trusted network or change the bind address before exposing it. Anyone who can reach the
-dashboard can rewrite `device.json`.
+dashboard can rewrite `device.json`, and can write a `.csv` file into `config/`.
 
 ---
 
@@ -953,6 +999,9 @@ midnight point — see Known issues.
 above, so they follow the looser rules described under Site model — header optional, any
 resolution, midnight wrap.
 
+A curve uploaded from the dashboard lands here as a fifth kind of file: same rules, same directory,
+written by `POST /api/curve` instead of by hand or by the generator. See Uploading a curve safely.
+
 All four are **generated**, not hand-typed — `python3 utils/make_curves.py` rewrites them from the
 design basis recorded at the top of that script. Edit the anchors there rather than the CSVs, so
 the reasoning stays with the numbers:
@@ -1032,6 +1081,7 @@ test/
   test_t98_load.py               the zero Tower 10 curve, load interpolation, T10 PV
   test_jtc_load.py               the JTC common load curve reader
   test_t7_pv.py                  the Tower 7 PV curve reader
+  test_curve_upload.py           curve uploads: naming, parsing, replacement
 config/
   device.json                    site definition
   modbus_registers.py            point name → register offset
@@ -1045,7 +1095,8 @@ src/
   communication/modbus_server.py Modbus TCP server
   communication/web_server.py    dashboard HTTP server and JSON API
   models/                        eight device models
-  models/curve.py                shared reader for operator-supplied curves
+  models/curve.py                shared reader for operator-supplied curves,
+                                 and the parser the dashboard upload validates with
 web/
   index.html                     the dashboard UI
 utils/

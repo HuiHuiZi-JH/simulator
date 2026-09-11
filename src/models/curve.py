@@ -20,6 +20,35 @@ logger = logging.getLogger('state')
 CONFIG_DIR = 'config'
 
 
+def parse_points(rows, source):
+    """Turn `hour,value` rows into the sorted point list a curve is made of.
+
+    Shared by `DayCurve` and by the dashboard's curve upload, so a file the
+    operator uploads is accepted on exactly the terms the model will later read
+    it back on -- there is no second, laxer parser that could let a file through
+    the web UI and then fail at startup.
+    """
+    points = {}
+    for line_no, row in enumerate(rows, start=1):
+        if len(row) < 2 or not row[0].strip() or row[0].lstrip().startswith('#'):
+            continue
+        try:
+            hour, value = float(row[0]), float(row[1])
+        except ValueError:
+            # A header line, not bad data -- but only on the first row.
+            if line_no > 1:
+                logger.warning("Ignoring unreadable row %d in %s: %r",
+                               line_no, source, row)
+            continue
+        if not 0.0 <= hour <= 24.0:
+            logger.warning("Ignoring out-of-range hour %s in %s", hour, source)
+            continue
+        points[hour % 24.0] = value   # 24.0 and 0.0 are the same instant
+    if not points:
+        raise ValueError("No usable hour,value rows in %s" % source)
+    return sorted(points.items())
+
+
 def resolve(csv_file, owner):
     """Curve paths are relative to config/ unless given absolute."""
     if not csv_file:
@@ -44,26 +73,8 @@ class DayCurve:
     def _read(self):
         if not os.path.exists(self.path):
             raise ValueError("CSV file %s not found for %s" % (self.path, self.owner))
-        points = {}
         with open(self.path, 'r', encoding='utf-8-sig') as f:
-            for line_no, row in enumerate(csv.reader(f), start=1):
-                if len(row) < 2 or not row[0].strip() or row[0].lstrip().startswith('#'):
-                    continue
-                try:
-                    hour, value = float(row[0]), float(row[1])
-                except ValueError:
-                    # A header line, not bad data -- but only on the first row.
-                    if line_no > 1:
-                        logger.warning("Ignoring unreadable row %d in %s: %r",
-                                       line_no, self.path, row)
-                    continue
-                if not 0.0 <= hour <= 24.0:
-                    logger.warning("Ignoring out-of-range hour %s in %s", hour, self.path)
-                    continue
-                points[hour % 24.0] = value   # 24.0 and 0.0 are the same instant
-        if not points:
-            raise ValueError("No usable hour,value rows in %s" % self.path)
-        return sorted(points.items())
+            return parse_points(csv.reader(f), self.path)
 
     def __len__(self):
         return len(self.points)

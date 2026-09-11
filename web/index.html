@@ -375,6 +375,10 @@
   label.check input { accent-color:var(--accent); width:1rem; height:1rem; }
   .field input:disabled { opacity:.45; cursor:not-allowed; }
 
+  .curve-field { margin-top:.75rem; }
+  .curve-row { display:flex; gap:.4rem; align-items:center; flex-wrap:wrap; }
+  .curve-row input[type=text] { flex:1 1 14rem; }
+
   .sched { display:flex; flex-direction:column; gap:.4rem; }
   .sched-row { display:flex; gap:.4rem; align-items:center; }
   .sched-row input { width:6rem; }
@@ -519,6 +523,7 @@
 
     <h2>Devices</h2>
     <div id="cfg-devices"></div>
+    <datalist id="curve-names"></datalist>
 
     <div class="cfg-actions">
       <select id="cfg-newtype" aria-label="Type of device to add"></select>
@@ -890,6 +895,7 @@
   var cfg = null;      // working copy, edited in place
   var schema = null;
   var types = [];
+  var curveFiles = [];  // readable CSVs in config/, from /api/curves
 
   function el(tag, cls, text) {
     var n = document.createElement(tag);
@@ -923,7 +929,10 @@
     var f = el("div", "field" + (required ? " req" : ""));
     var lab = el("label", null, labelText);
     var id = "f" + (field._n = (field._n || 0) + 1);
-    input.id = id; lab.htmlFor = id;
+    // A composite control is a <div>, which a label cannot name; it points at
+    // the input inside it instead.
+    var named = input.labelFor || input;
+    named.id = id; lab.htmlFor = id;
     f.appendChild(lab); f.appendChild(input);
     return f;
   }
@@ -960,6 +969,110 @@
     sel.value = String(dev[key] === undefined ? 0 : dev[key]);
     sel.addEventListener("change", function () { dev[key] = parseInt(sel.value, 10); });
     return sel;
+  }
+
+  /* A curve field is a path plus a way to put a file at that path. The text box
+     still takes anything -- a name in config/, or an absolute path the operator
+     maintains elsewhere -- and the upload button is the short way there. */
+
+  function describeCurve(name) {
+    if (!name) return "A file in config/, or an absolute path. Upload one to add it.";
+    for (var i = 0; i < curveFiles.length; i++) {
+      if (curveFiles[i].name === name) {
+        var c = curveFiles[i];
+        return c.points + " points, " + fmt(c.min) + " to " + fmt(c.max)
+             + " \u2014 in config/";
+      }
+    }
+    return name.charAt(0) === "/"
+      ? "Read from this absolute path when the simulator starts."
+      : "No file called that in config/ yet \u2014 upload one, or give an absolute path.";
+  }
+
+  function loadCurves() {
+    return fetch("/api/curves", { cache: "no-store" })
+      .then(function (r) { return r.json(); })
+      .then(function (d) {
+        curveFiles = d.curves || [];
+        var list = $("curve-names");
+        list.innerHTML = "";
+        curveFiles.forEach(function (c) {
+          var o = document.createElement("option");
+          o.value = c.name;
+          list.appendChild(o);
+        });
+      })
+      .catch(function () { /* the field still takes a typed path */ });
+  }
+
+  function uploadCurve(name, text, overwrite, done) {
+    return fetch("/api/curve", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name: name, content: text, overwrite: !!overwrite })
+    }).then(function (r) { return r.json(); }).then(function (res) {
+      if (res.ok) {
+        toast("Uploaded " + res.name + " \u2014 " + res.points
+              + " points; restart to apply");
+        return loadCurves().then(function () { done(res); });
+      }
+      // The only refusal the operator can answer themselves: the name is taken.
+      if (res.exists && !overwrite) {
+        if (confirm("config/" + name + " already exists. Replace it?")) {
+          return uploadCurve(name, text, true, done);
+        }
+        return;
+      }
+      toast((res.errors || ["Upload failed"])[0], true);
+    }).catch(function (e) { toast("Could not upload: " + e.message, true); });
+  }
+
+  function curveInput(dev, key) {
+    var wrap = el("div", "curve-input");
+    var row = el("div", "curve-row");
+
+    var box = document.createElement("input");
+    box.type = "text";
+    box.setAttribute("list", "curve-names");
+    box.placeholder = "curve.csv";
+    box.value = dev[key] === undefined ? "" : dev[key];
+
+    var note = el("p", "hint", describeCurve(box.value));
+
+    box.addEventListener("input", function () {
+      if (box.value === "") delete dev[key]; else dev[key] = box.value;
+      note.textContent = describeCurve(box.value);
+    });
+
+    var file = document.createElement("input");
+    file.type = "file";
+    file.accept = ".csv,text/csv";
+    file.hidden = true;
+    file.addEventListener("change", function () {
+      var chosen = file.files && file.files[0];
+      file.value = "";          // so picking the same file again still fires
+      if (!chosen) return;
+      var reader = new FileReader();
+      reader.onerror = function () {
+        toast("Could not read " + chosen.name, true);
+      };
+      reader.onload = function () {
+        uploadCurve(chosen.name, String(reader.result), false, function (res) {
+          box.value = res.name; dev[key] = res.name;
+          note.textContent = describeCurve(res.name);
+        });
+      };
+      reader.readAsText(chosen);
+    });
+
+    var pick = el("button", "ghost small", "Upload CSV\u2026");
+    pick.type = "button";
+    pick.addEventListener("click", function () { file.click(); });
+
+    row.appendChild(box); row.appendChild(pick); row.appendChild(file);
+    wrap.appendChild(row); wrap.appendChild(note);
+    wrap.labelFor = box;
+    return wrap;
   }
 
   function scheduleEditor(dev, key) {
@@ -1040,6 +1153,15 @@
     (schema[item.type] || []).forEach(function (spec) {
       var key = spec[0], label = spec[1], kind = spec[2], required = spec[3];
       if (kind === "schedule") { card.appendChild(fields); card.appendChild(scheduleEditor(item.dev, key)); fields = el("div", "fields"); return; }
+      if (kind === "curve") {
+        // Wider than a grid cell: a path, an upload button and a line about it.
+        card.appendChild(fields);
+        var cf = field(label, required, curveInput(item.dev, key));
+        cf.className += " curve-field";
+        card.appendChild(cf);
+        fields = el("div", "fields");
+        return;
+      }
       var input = kind === "number" ? numberInput(item.dev, key)
                 : kind === "mode"   ? modeInput(item.dev, key)
                                     : textInput(item.dev, key);
@@ -1091,7 +1213,7 @@
           sel.appendChild(o);
         });
         $("cfg-errors").hidden = true;
-        renderConfig();
+        return loadCurves().then(renderConfig);
       })
       .catch(function (e) { toast("Could not load configuration: " + e.message, true); });
   }

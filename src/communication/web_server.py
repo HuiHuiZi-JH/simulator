@@ -6,22 +6,34 @@ devices_data table the Modbus server reads, guarded by the same lock.
 Standard library only, in keeping with the project's zero-dependency rule.
 """
 import copy
+import csv
+import io
 import json
 import logging
 import os
+import re
 import threading
 import time
 import urllib.parse
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 from config.modbus_registers import REGISTERS
+from src.models.curve import parse_points
 
 logger = logging.getLogger('message')
 
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(
     os.path.abspath(__file__))))
 WEB_ROOT = os.path.join(PROJECT_ROOT, 'web')
-CONFIG_PATH = os.path.join(PROJECT_ROOT, 'config', 'device.json')
+CONFIG_DIR = os.path.join(PROJECT_ROOT, 'config')
+CONFIG_PATH = os.path.join(CONFIG_DIR, 'device.json')
+
+# An uploaded curve is a few thousand rows of text; anything larger is not a day
+# curve, and is refused before it is read rather than after.
+MAX_CURVE_BYTES = 1 << 20
+# Uploads land in config/ under a plain file name. No directory part survives
+# this pattern, so an upload cannot reach outside config/ whatever it is called.
+CURVE_NAME = re.compile(r'^[A-Za-z0-9][A-Za-z0-9._-]*\.csv$')
 
 # Registers the simulation reads back as control inputs. Anything not listed
 # here is an output that the next tick would overwrite, so the UI refuses it.
@@ -45,13 +57,13 @@ DEVICE_TYPES = ('Meter', 'PV', 'BESS', 'EV', 'Load', 'JTCLoad', 'T7PV',
 
 # Fields the config editor exposes, per device type:
 #   (json key, label, kind, required)
-# kind is one of: number, text, mode, schedule
+# kind is one of: number, text, curve, mode, schedule
 CONFIG_FIELDS = {
     'Meter': [],
     'PV': [
         ('ratedPower', 'Rated power (kW)', 'number', True),
         ('mode', 'Source', 'mode', False),
-        ('csv_file', 'Curve file', 'text', False),
+        ('csv_file', 'Curve file', 'curve', False),
     ],
     'BESS': [
         ('ratedCapacity', 'Capacity (kWh)', 'number', True),
@@ -73,15 +85,15 @@ CONFIG_FIELDS = {
     'Load': [
         ('base_power', 'Base power (kW)', 'number', True),
         ('mode', 'Source', 'mode', False),
-        ('csv_file', 'Curve file', 'text', False),
+        ('csv_file', 'Curve file', 'curve', False),
     ],
     # No base power and no synthetic mode: the JTC common load is the curve
     # the operator supplies, or nothing at all.
     'JTCLoad': [
-        ('csv_file', 'Curve file', 'text', True),
+        ('csv_file', 'Curve file', 'curve', True),
     ],
     'T7PV': [
-        ('csv_file', 'Curve file', 'text', True),
+        ('csv_file', 'Curve file', 'curve', True),
     ],
     'VirtualGrid': [
         ('max_import', 'Max import (kW)', 'number', False),
@@ -167,6 +179,9 @@ def validate_config(cfg):
                     if kind == 'number' and not isinstance(value, (int, float)):
                         errors.append('%s: %s must be a number'
                                       % (key or dev_type, label))
+                    elif kind in ('text', 'curve') and not isinstance(value, str):
+                        errors.append('%s: %s must be text'
+                                      % (key or dev_type, label))
                     elif kind == 'mode' and value not in (0, 1):
                         errors.append('%s: source must be 0 (curve) or 1 (synthetic)'
                                       % (key or dev_type))
@@ -187,6 +202,82 @@ def validate_config(cfg):
     if total == 0:
         errors.append('Configure at least one device')
     return errors
+
+
+def list_curves():
+    """Every readable curve in config/, so the editor can offer them by name.
+
+    A file that will not parse is left out rather than offered and then failing
+    at startup; the field still takes a typed path, so nothing is hidden away.
+    """
+    out = []
+    try:
+        names = sorted(os.listdir(CONFIG_DIR))
+    except OSError as e:
+        logger.error('Cannot list %s: %s', CONFIG_DIR, e)
+        return out
+    for name in names:
+        if not name.endswith('.csv'):
+            continue
+        try:
+            with open(os.path.join(CONFIG_DIR, name), 'r', encoding='utf-8-sig') as f:
+                points = parse_points(csv.reader(f), name)
+        except (OSError, ValueError):
+            continue
+        values = [v for _, v in points]
+        out.append({'name': name, 'points': len(points),
+                    'min': min(values), 'max': max(values)})
+    return out
+
+
+def save_curve(name, text, overwrite=False):
+    """Validate an uploaded day curve and write it into config/.
+
+    Parsed by `parse_points`, the same reader the models use, so a file accepted
+    here cannot fail when the simulator restarts. Written through a .tmp file and
+    swapped in with os.replace, for the reason device.json is: a half-written
+    upload must never replace a curve that was good.
+
+    Returns (ok, result). On refusal the result carries `errors`, plus `exists`
+    when the only problem is that overwriting was not asked for.
+    """
+    name = os.path.basename((name or '').strip())
+    if not CURVE_NAME.match(name):
+        return False, {'errors': ['File name must be plain letters, digits, '
+                                  '. _ or - and end in .csv, for example '
+                                  'my_load_curve.csv']}
+    if not isinstance(text, str):
+        return False, {'errors': ['Upload must be CSV text']}
+    if len(text.encode('utf-8')) > MAX_CURVE_BYTES:
+        return False, {'errors': ['Curve file is larger than %d KB'
+                                  % (MAX_CURVE_BYTES // 1024)]}
+    try:
+        points = parse_points(csv.reader(io.StringIO(text)), name)
+    except ValueError as e:
+        return False, {'errors': [str(e),
+                                  'Each row is hour,value -- for example '
+                                  '13.25,1820. A header row is allowed.']}
+
+    path = os.path.join(CONFIG_DIR, name)
+    exists = os.path.exists(path)
+    if exists and not overwrite:
+        return False, {'exists': True,
+                       'errors': ['config/%s already exists' % name]}
+    try:
+        tmp = path + '.tmp'
+        with open(tmp, 'w', encoding='utf-8', newline='') as f:
+            f.write(text if text.endswith('\n') else text + '\n')
+        os.replace(tmp, path)
+    except OSError as e:
+        logger.error('Failed to write curve %s: %s', path, e)
+        return False, {'errors': ['Could not write config/%s: %s' % (name, e)]}
+
+    values = [v for _, v in points]
+    logger.info('Curve uploaded via web UI: %s (%d points, %.1f to %.1f)%s',
+                name, len(points), min(values), max(values),
+                ' -- replaced the previous file' if exists else '')
+    return True, {'name': name, 'points': len(points), 'min': min(values),
+                  'max': max(values), 'replaced': exists}
 
 
 class WebServer:
@@ -344,6 +435,8 @@ class WebServer:
                     self._json(200, server.snapshot())
                 elif self.path.startswith('/api/history'):
                     self._json(200, server.history_dump(self.path))
+                elif self.path.startswith('/api/curves'):
+                    self._json(200, {'curves': list_curves(), 'dir': 'config'})
                 elif self.path.startswith('/api/config'):
                     try:
                         self._json(200, {
@@ -385,6 +478,25 @@ class WebServer:
                         pass
                     logger.info('Restart requested from %s', self.address_string())
                     threading.Timer(0.5, server.restart_hook).start()
+
+                elif self.path.startswith('/api/curve'):
+                    length = int(self.headers.get('Content-Length', 0))
+                    if length > 2 * MAX_CURVE_BYTES:
+                        self._json(413, {'ok': False,
+                                         'errors': ['Curve file is too large']})
+                        return
+                    try:
+                        payload = self._body()
+                    except (ValueError, TypeError) as e:
+                        self._json(400, {'ok': False,
+                                         'errors': ['Malformed request: %s' % e]})
+                        return
+                    ok, result = save_curve(payload.get('name'),
+                                            payload.get('content'),
+                                            bool(payload.get('overwrite')))
+                    result['ok'] = ok
+                    self._json(200 if ok else (409 if result.get('exists') else 400),
+                               result)
 
                 elif self.path.startswith('/api/config'):
                     try:
