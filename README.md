@@ -691,13 +691,27 @@ dependencies, in keeping with Rule 1's conventions.
 
 The dashboard has three tabs.
 
-**Live** shows the Tower 10 point of common coupling as the headline figure with a rolling
-sparkline, then a card per device with live power, state, accumulated energy, and battery SOC. The
-JTC common load and the virtual grid incoming point get cards of their own; both sit outside the
-Tower 10 coupling point, so neither is counted into the headline generation and consumption
-totals. The three control
-registers get a slider and a numeric field, so curtailing the inverter or commanding the battery
-takes a drag rather than a hand-built Modbus frame.
+**Live** headlines the **virtual grid incoming point** — `JTC common load + BESS`, the calculated
+figure the EGC actually regulates — as a big number with a rolling sparkline, the day's energy
+through that point, the 1,700 kW maximum import and how much headroom is left under it. Headroom
+goes negative when the limit is already crossed, which is the moment use-case 1 exists for. The
+sparkline carries the same dashed import cap the trend chart does, drawn only when it is on scale.
+
+The headline used to be the Tower 10 point of common coupling — `Meter_01` — and that swap is
+deliberate: the PCC is a real meter but it is *not* what the EGC controls against, and a dashboard
+leads with the number its operator is steering by. The meter did not lose anything by moving: it
+now gets an ordinary device card (power, importing/exporting, both kWh counters) alongside the
+others, keeps its box on the site diagram, and keeps the full register list in the detail panel.
+The virtual grid point is the one without a card now, because it is in the hero instead.
+
+Below the hero, a card per device with live power, state, accumulated energy, and battery SOC. The
+three control registers get a slider and a numeric field, so curtailing the inverter or commanding
+the battery takes a drag rather than a hand-built Modbus frame.
+
+The **generating / consuming "right now" pair is gone** with the old hero. It summed the devices
+inside the Tower 10 loop, which was the boundary the old headline described; against a virtual
+point whose only terms are the common load and the battery it would have been answering a question
+nobody asked. Per-device power is on the cards and on the diagram.
 
 **Trends** charts every device's active power over time, drawn from the rolling history above so
 it is populated the moment the tab opens rather than filling in from empty. One line per device on
@@ -736,7 +750,7 @@ The chart polls `/api/history` only while its tab is open, and asks for `?after=
 fetches the handful of samples it is missing rather than the whole day. A restart resets the
 sequence counter; the client notices the discontinuity and refetches in full.
 
-**The site diagram** sits between the coupling-point figure and the device cards, and draws the
+**The site diagram** sits between the virtual-grid headline and the device cards, and draws the
 shipped device set as one live single line: the JTC common load and the virtual grid point above
 the EGC control boundary, the Tower 10 loop below it — grid, meter, T98 LV bus, and the devices
 hung off that bus. Every box carries its own headline power, tinted the way the cards are: green

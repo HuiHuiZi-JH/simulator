@@ -141,6 +141,14 @@
 
   .spark { margin-top:1.1rem; width:100%; height:64px; display:block; }
 
+  .herofoot {
+    margin:.9rem 0 0; font-size:.78rem; line-height:1.55; color:var(--faint);
+    max-width:52ch;
+  }
+  .herofoot code {
+    font-family:"IBM Plex Mono",monospace; font-size:.95em; color:var(--muted);
+  }
+
   .kv { display:flex; align-items:baseline; justify-content:space-between; gap:1rem; }
   .kv dt { font-size:.78rem; color:var(--muted); }
   .kv dd {
@@ -521,31 +529,34 @@
 
   <div class="view" id="view-live" role="tabpanel" aria-labelledby="tab-live">
 
-  <section class="hero" aria-labelledby="pcc-label">
+  <section class="hero" aria-labelledby="vg-label">
     <div class="hero-grid">
       <div class="hero-main">
-        <p class="label" id="pcc-label">Point of common coupling</p>
-        <p class="bignum"><span id="net">—</span><span class="unit">kW</span></p>
+        <p class="label" id="vg-label">Virtual grid incoming</p>
+        <p class="bignum"><span id="net">&mdash;</span><span class="unit">kW</span></p>
         <span class="flowpill idle" id="flow">waiting for data</span>
         <svg class="spark" id="spark" viewBox="0 0 600 64" preserveAspectRatio="none" aria-hidden="true"></svg>
+        <p class="herofoot">JTC common load + BESS &mdash; the calculated figure the EGC regulates,
+          against its maximum import. Tower 10&rsquo;s own point of common coupling is
+          <code>Meter_01</code>, on the diagram below and on its own card.</p>
       </div>
       <div class="hero-side">
         <div>
           <p class="label">Energy today</p>
           <dl class="kv" style="margin:0 0 .5rem">
-            <dt>Imported from grid</dt><dd class="con num" id="e-import">—</dd>
+            <dt>Imported through the point</dt><dd class="con num" id="e-import">&mdash;</dd>
           </dl>
           <dl class="kv" style="margin:0">
-            <dt>Exported to grid</dt><dd class="gen num" id="e-export">—</dd>
+            <dt>Exported through the point</dt><dd class="gen num" id="e-export">&mdash;</dd>
           </dl>
         </div>
         <div>
-          <p class="label">Right now</p>
+          <p class="label">Against the limit</p>
           <dl class="kv" style="margin:0 0 .5rem">
-            <dt>Generating</dt><dd class="gen num" id="p-gen">—</dd>
+            <dt>Maximum import</dt><dd class="num" id="vg-limit">&mdash;</dd>
           </dl>
           <dl class="kv" style="margin:0">
-            <dt>Consuming</dt><dd class="con num" id="p-con">—</dd>
+            <dt>Headroom</dt><dd class="num" id="vg-headroom">&mdash;</dd>
           </dl>
         </div>
       </div>
@@ -712,6 +723,19 @@
     zero.setAttribute("stroke-width", "1");
     svg.appendChild(zero);
 
+    // The import cap, dashed, and only when it is on scale — overnight the
+    // trace is a tenth of the limit and the line would just pin to the edge.
+    var thr = maxImport();
+    if (thr && thr <= hi && thr >= lo) {
+      var cap = document.createElementNS(ns, "line");
+      cap.setAttribute("x1", 0); cap.setAttribute("x2", W);
+      cap.setAttribute("y1", y(thr)); cap.setAttribute("y2", y(thr));
+      cap.setAttribute("stroke", "var(--warn)");
+      cap.setAttribute("stroke-width", "1");
+      cap.setAttribute("stroke-dasharray", "5 4");
+      svg.appendChild(cap);
+    }
+
     var last = netHistory[netHistory.length - 1];
     var stroke = last > 0.01 ? "var(--con)" : (last < -0.01 ? "var(--gen)" : "var(--faint)");
 
@@ -790,6 +814,7 @@
       title: "Virtual Grid Incoming", role: "is-both",
       primary: "VG.ActivePower",
       offLoop: true,          // derived above the EGC control boundary
+      hero: true,             // headlined at the top of Live, so no card of its own
       pill: { on: "exporting", draw: "importing" },
       rows: [["Imported", "VG.APConsumedKWH", "kWh", 2],
              ["Exported", "VG.APProductionKWH", "kWh", 2],
@@ -797,7 +822,13 @@
              ["BESS zero export", "VG.BessZeroExport", "kW", 0],
              ["T98 loop limit", "VG.T98LoopLimit", "kW", 0]]
     },
-    Meter: null   // rendered in the hero instead
+    Meter: {
+      title: "Tower 10 Grid Meter", role: "is-both",
+      primary: "ActivePower",
+      pill: { on: "exporting", draw: "importing" },
+      rows: [["Imported", "APConsumedKWH", "kWh", 3],
+             ["Exported", "APProductionKWH", "kWh", 3]]
+    }
   };
 
   function cardId(key) { return "dev-" + key.replace(/[^A-Za-z0-9_-]/g, "_"); }
@@ -888,7 +919,8 @@
       pill.className = "statepill off"; pill.textContent = "idle";
       el.className = "card is-idle";
     } else if (dev.type === "PV" || dev.type === "T7PV" ||
-               ((dev.type === "BESS" || dev.type === "VirtualGrid") && power < 0)) {
+               ((dev.type === "BESS" || dev.type === "VirtualGrid" ||
+                 dev.type === "Meter") && power < 0)) {
       pill.className = "statepill on";
       pill.textContent = (spec.pill && spec.pill.on) ||
                          (dev.type === "BESS" ? "discharging" : "generating");
@@ -1002,7 +1034,6 @@
 
   function primaryOf(dev) {
     if (!dev) return 0;
-    if (dev.type === "Meter") return dev.points["ActivePower"] || 0;
     var sp = SPEC[dev.type];
     return sp ? (dev.points[sp.primary] || 0) : 0;
   }
@@ -1370,43 +1401,48 @@
     $("simclock").textContent = hourToClock(state.sim_hour);
     $("wallclock").textContent = state.wall_time;
 
-    var meter = null, gen = 0, con = 0;
+    var vgrid = null;
     state.devices.forEach(function (d) {
-      if (d.type === "Meter") { meter = d; return; }
-      var spec = SPEC[d.type];
-      // offLoop devices sit outside the Tower 10 coupling point the hero
-      // summarises, so they must not move its generation/consumption totals.
-      if (!spec || spec.offLoop) return;
-      var v = d.points[spec.primary] || 0;
-      if (d.type === "PV") gen += v;
-      else if (d.type === "BESS") { if (v < 0) gen += -v; else con += v; }
-      else con += v;
+      if (d.type === "VirtualGrid") vgrid = d;
     });
 
-    if (meter) {
-      var net = meter.points["ActivePower"] || 0;
+    if (vgrid) {
+      var net = vgrid.points["VG.ActivePower"] || 0;
       $("net").textContent = fmt(net, 2);
       var flow = $("flow");
       if (net > 0.01) { flow.className = "flowpill import"; flow.textContent = "Importing from grid"; }
       else if (net < -0.01) { flow.className = "flowpill export"; flow.textContent = "Exporting to grid"; }
       else { flow.className = "flowpill idle"; flow.textContent = "Balanced"; }
 
-      $("e-import").textContent = fmt(meter.points["APConsumedKWH"], 3) + " kWh";
-      $("e-export").textContent = fmt(meter.points["APProductionKWH"], 3) + " kWh";
+      $("e-import").textContent = fmt(vgrid.points["VG.APConsumedKWH"], 3) + " kWh";
+      $("e-export").textContent = fmt(vgrid.points["VG.APProductionKWH"], 3) + " kWh";
+
+      // Headroom is the whole point of the figure: how much of the EGC's import
+      // allowance is left before use-case 1 has to discharge. Negative means the
+      // limit is already crossed.
+      var lim = vgrid.points["VG.MaxImport"] || 0;
+      var room = $("vg-headroom");
+      $("vg-limit").textContent = lim ? fmt(lim, 0) + " kW" : "\u2014";
+      if (lim) {
+        var left = lim - net;
+        room.textContent = fmt(left) + " kW";
+        room.className = "num " + (left < 0 ? "con" : "gen");
+      } else {
+        room.textContent = "\u2014";
+        room.className = "num";
+      }
 
       netHistory.push(net);
       if (netHistory.length > HISTORY) netHistory.shift();
       drawSpark();
     }
-    $("p-gen").textContent = fmt(gen) + " kW";
-    $("p-con").textContent = fmt(con) + " kW";
 
     updateDiagram(state);
 
     var host = $("devices");
     if (host.querySelector(".empty")) host.innerHTML = "";
     state.devices.forEach(function (d) {
-      if (!SPEC[d.type]) return;
+      if (!SPEC[d.type] || SPEC[d.type].hero) return;
       var el = document.getElementById(cardId(d.key));
       if (!el) { el = buildCard(d); host.appendChild(el); }
       updateCard(el, d);
