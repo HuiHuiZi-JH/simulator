@@ -25,8 +25,8 @@
         {
           "DeviceKey": "BESS_01",
           "ratedCapacity": 12000,
-          "maxChargePower": 800,
-          "maxDischargePower": 800,
+          "maxChargePower": 1000,
+          "maxDischargePower": 997,
           "socMax": 100,
           "socMin": 0,
           "initial_soc": 0.5,
@@ -40,7 +40,7 @@
       "Load": [
         {
           "DeviceKey": "LOAD_001",
-          "base_power": 50,
+          "base_power": 1000,
           "mode": 0,
           "csv_file": "load_curve.csv",
           "slave_id": 8
@@ -67,5 +67,6 @@
         }
       ]
     }
-  ]
+  ],
+  "web_port": 8080
 }

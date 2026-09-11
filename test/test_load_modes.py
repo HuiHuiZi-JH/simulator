@@ -12,12 +12,14 @@ Those offsets are asserted here against the register map, because nothing else
 would notice if the two drifted apart: the load would quietly keep running on
 whatever it started with.
 """
+import json
 import os
 import tempfile
 import unittest
 
 from src.communication import web_server
-from src.models.load_model import LoadModel, MODE_CURVE, MODE_SIM, MODE_MANUAL
+from src.models.load_model import (DEFAULT_BASE_POWER, LoadModel, MODE_CURVE,
+                                   MODE_MANUAL, MODE_SIM)
 from config.modbus_registers import REGISTERS
 
 BASE = 400.0
@@ -103,6 +105,42 @@ class CurveLoadedOnDemand(unittest.TestCase):
                        'csv_file': 'no_such_curve.csv'}, 12.0)
         v = m.update(mode=MODE_CURVE)['Load.Power']
         self.assertTrue(BASE * 0.8 <= v <= BASE * 1.2, v)
+
+
+class NoBasePowerConfigured(unittest.TestCase):
+    """The model and main.py must seed the manual register from the same figure.
+
+    They used to disagree: the model fell back to 120 kW for the simulated day
+    while main.py seeded Load.PowerSet with 0, so a load with no `base_power`
+    switched to manual and held nothing.
+    """
+
+    def test_the_model_falls_back_to_the_shared_default(self):
+        m = LoadModel({'DeviceKey': 'L', 'mode': MODE_SIM}, 12.0)
+        self.assertEqual(m.base_power, DEFAULT_BASE_POWER)
+        self.assertEqual(m.update(mode=MODE_MANUAL)['Load.Power'], DEFAULT_BASE_POWER)
+
+    def test_main_seeds_the_register_from_the_same_constant(self):
+        # main.py: initial_data[offset] = float(dev.get('base_power', DEFAULT_BASE_POWER))
+        source = open(os.path.join(os.path.dirname(os.path.dirname(
+            os.path.abspath(__file__))), 'main.py')).read()
+        self.assertIn("dev.get('base_power',", source)
+        self.assertIn('DEFAULT_BASE_POWER', source)
+
+
+class ShippedLoad(unittest.TestCase):
+
+    def test_manual_starts_at_the_operator_band_floor(self):
+        # device.json ships base_power at 1,000 kW -- the floor of the
+        # 1,000-1,800 kW band given for T98 -- so both the simulated day and the
+        # manual source start somewhere plausible for this tenant instead of at
+        # the 50 kW left over from before Tower 10 was simulated.
+        cfg = json.load(open(os.path.join('config', 'device.json')))
+        loads = [d for group in cfg['Devices'] for t, devs in group.items()
+                 if t == 'Load' for d in devs]
+        self.assertTrue(loads)
+        for dev in loads:
+            self.assertEqual(dev['base_power'], 1000)
 
 
 class ControlRegisters(unittest.TestCase):

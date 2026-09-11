@@ -14,7 +14,7 @@ from src.models.pv_model import PVModel
 from src.models.battery_model import BatteryModel
 from src.models.ev_model import EVModel
 from src.models.meter_model import MeterModel
-from src.models.load_model import LoadModel
+from src.models.load_model import LoadModel, DEFAULT_BASE_POWER
 from src.models.jtc_load_model import JTCLoadModel
 from src.models.t7_pv_model import T7PVModel
 from src.models.virtual_grid_model import VirtualGridModel
@@ -177,7 +177,8 @@ def load_config():
                     if dev_type == 'Load' and reg_name == 'Load.ModeSet':
                         initial_data[reg_offset] = float(dev.get('mode', 0))
                     if dev_type == 'Load' and reg_name == 'Load.PowerSet':
-                        initial_data[reg_offset] = float(dev.get('base_power', 0.0))
+                        initial_data[reg_offset] = float(dev.get('base_power',
+                                                                DEFAULT_BASE_POWER))
                 configured_slave_id = dev.get('slave_id')
                 if configured_slave_id is not None:
                     if not 1 <= configured_slave_id <= 247:

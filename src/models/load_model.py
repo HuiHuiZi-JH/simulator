@@ -11,18 +11,26 @@ logger = logging.getLogger('state')
 # a Modbus write to Load.ModeSet.
 MODE_CURVE, MODE_SIM, MODE_MANUAL = 0, 1, 2
 
+# What a load with no `base_power` in device.json runs at. It is the centre of
+# the simulated day and the figure the manual source starts from, so main.py
+# seeds Load.PowerSet from the same constant rather than a second guess.
+DEFAULT_BASE_POWER = 120.0
+
 
 class LoadModel:
     def __init__(self, config, start_hour):
         self.config = config
-        self.base_power = config.get('base_power', 120.0)  # 仅用于参考，不影响插值
+        self.base_power = config.get('base_power', DEFAULT_BASE_POWER)  # 仅用于参考，不影响插值
         self.power = 0.0
         self.mode = config.get('mode', 0)
         self.csv_file = os.path.join('config', config.get('csv_file', ''))
         self.power_curve = {}
         self.start_hour = start_hour
         self.start_time = time.time()
-        self.manual_power = float(config.get('base_power', 0.0))
+        # The manual source starts where the simulated one is centred, so
+        # switching to it holds a figure the operator configured rather than a
+        # zero nobody asked for.
+        self.manual_power = float(self.base_power)
         if self.mode == MODE_CURVE and self.csv_file:
             self.load_power_curve()
         logger.info(f"LoadModel initialized for {config.get('DeviceKey')}: base_power = {self.base_power} kW, Mode = {self.mode}, Start hour = {self.start_hour}")

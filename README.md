@@ -266,7 +266,18 @@ Load.ModeSet = 2 (manual):     P = max(0, Load.PowerSet)
 ```
 
 `Load.ModeSet` starts at the `mode` in `device.json` and `Load.PowerSet` at its `base_power`, so an
-unwritten register never means something the operator did not configure. A device that started on
+unwritten register never means something the operator did not configure. `base_power` therefore
+does two jobs: it is the centre of the simulated day, and it is what the manual source holds until
+someone types over it. `LOAD_001` ships it at **1,000 kW** — the floor of the 1,000–1,800 kW band
+given for T98 — so both start somewhere plausible for this tenant; it was 50 kW while Tower 10 was
+not simulated at all, which left the manual source opening at a fiftieth of the real load. A load
+with no `base_power` at all falls back to `DEFAULT_BASE_POWER`, 120 kW, in the model *and* in
+`main.py`'s register seed — one constant, imported, because the two used to disagree and a load
+with no base power switched to manual and held zero.
+
+The default only applies at start-up. `Load.PowerSet` is a register: once written it keeps the last
+figure, so switching to the curve and back to manual returns to whatever was typed before, not to
+the default. A device that started on
 a synthetic or manual source has never read its CSV; switching to the curve loads it at that moment,
 and a missing or unusable file falls back to the synthetic day rather than to a silent zero.
 
