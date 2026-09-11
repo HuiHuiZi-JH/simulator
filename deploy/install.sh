@@ -79,12 +79,17 @@ systemctl restart "$SERVICE"
 sleep 2
 systemctl status "$SERVICE" --no-pager || true
 
+# The dashboard's port is device.json's to choose, and on a host where
+# something already owns 8080 it will not be 8080. Report what this install will
+# actually listen on rather than the default.
+WEB_PORT=$("$PYTHON" -c "import json;print(json.load(open('$PREFIX/config/device.json')).get('web_port',8080))" 2>/dev/null || echo 8080)
+
 cat <<MSG
 
 MicroGrid Simulator installed.
 
   Modbus TCP      0.0.0.0:5021   (unit 1, address 0, quantity 2 = net kW x100)
-  Web dashboard   http://<this-host>:8080
+  Web dashboard   http://<this-host>:$WEB_PORT
   Logs            $PREFIX/log/ and journalctl -u $SERVICE -f
   Settings        $PREFIX/config/device.json (or the dashboard's Config tab)
 

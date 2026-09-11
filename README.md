@@ -175,8 +175,16 @@ that restarts forever. Build on a machine whose `python3` matches the host's, or
 matching `python3` there.
 
 The host needs no third-party packages — the release is standard library only, like the source.
-Open TCP 5021 and 8080 to whoever must reach the simulator, and nothing else: both servers bind
-`0.0.0.0` and neither asks for a password.
+Open TCP 5021 and the dashboard port to whoever must reach the simulator, and nothing else: both
+servers bind `0.0.0.0` and neither asks for a password.
+
+**A busy host may already own 8080.** The dashboard's port is `web_port` in `device.json`, and if
+something else holds the default the web thread logs `Failed to bind web port 8080: Address
+already in use` and stops — the simulation and the Modbus server carry on without it, which is why
+the service still reads as `active`. A browser pointed at 8080 then gets the *other* application's
+404, not ours. Check with `ss -ltnp | grep 8080`, set `web_port` to a free port that the host's
+firewall already accepts, and restart. `install.sh` prints whichever port the installed
+`device.json` names, so the closing message is the one to trust.
 
 ---
 

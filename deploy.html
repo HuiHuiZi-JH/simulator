@@ -670,6 +670,15 @@ ssh user@host <span class="str">'sudo ~/microgridsim-v1.3-py3.12.run'</span></co
               <td class="wide"><code>ss -ltnp | grep -E '5021|8080'</code>, stop that process, then <code>systemctl restart</code></td>
             </tr>
             <tr>
+              <td class="wide">Browser shows a <em>Not Found</em> page that is not the dashboard</td>
+              <td class="wide">Another application already owns port 8080 on that host — the web
+                thread could not bind, and the simulation carried on without it, so the service
+                still reads as <code>active</code></td>
+              <td class="wide"><code>ss -ltnp | grep 8080</code> to see who has it, then set
+                <code>web_port</code> in <code>config/device.json</code> to a free port the
+                firewall already accepts and <code>systemctl restart</code></td>
+            </tr>
+            <tr>
               <td class="wide">Service runs, dashboard unreachable</td>
               <td class="wide">Firewall, not the simulator — it binds <code>0.0.0.0</code></td>
               <td class="wide">Confirm with <code>curl -s localhost:8080/api/state</code> on the host, then open the port</td>
