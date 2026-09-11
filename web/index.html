@@ -1153,7 +1153,10 @@
     (schema[item.type] || []).forEach(function (spec) {
       var key = spec[0], label = spec[1], kind = spec[2], required = spec[3];
       if (kind === "schedule") { card.appendChild(fields); card.appendChild(scheduleEditor(item.dev, key)); fields = el("div", "fields"); return; }
-      if (kind === "curve") {
+      // The kind comes from the running process, which may predate the curve
+      // field; a csv_file is a curve whatever that process calls it, so the
+      // upload control never depends on the two being in step.
+      if (kind === "curve" || key === "csv_file") {
         // Wider than a grid cell: a path, an upload button and a line about it.
         card.appendChild(fields);
         var cf = field(label, required, curveInput(item.dev, key));

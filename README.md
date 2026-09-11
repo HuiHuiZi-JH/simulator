@@ -730,7 +730,13 @@ button. The text box still accepts anything the model does — a name in `config
 path to a file the operator keeps elsewhere — and offers the curves already in `config/` as
 suggestions; under it, a line says how many points the named curve has and the range it covers, or
 that no such file is there yet. Uploading sends the file to `POST /api/curve`, which writes it into
-`config/` and fills the field in with its name. An upload does not touch `device.json`: the field
+`config/` and fills the field in with its name.
+
+The page decides a field is a curve field from either half of what it knows — the `curve` kind in
+the schema, or the field being `csv_file` — because the schema comes from the *running* process.
+A browser reloaded against a simulator that has not restarted yet gets the new page and the old
+schema, and keying only off the schema would render a plain text box with no upload button, which
+reads as a missing feature rather than a stale process. An upload does not touch `device.json`: the field
 is set in the form and saved with everything else, so an upload the operator changes their mind
 about is discarded with **Discard changes** like any other edit.
 
