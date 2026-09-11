@@ -953,8 +953,9 @@
       formula: "INV.GenActivePW = curve(sim_hour) × ratedPower, capped by INV.LimitPower"
     },
     Load: {
-      what: "The Tower 10 tenant load. The shipped curve is all zero — only the JTC common load " +
-            "is simulated — so this reads 0 kW until that curve is restored.",
+      what: "The Tower 10 tenant load, behind the T98 transformer. The shipped curve runs from " +
+            "about 1,000 kW overnight to about 1,800 kW mid-afternoon, so the peak crosses the " +
+            "1,750 kW multi-loop limit on its own.",
       formula: "Load.Power = curve(sim_hour)"
     },
     EV: {

@@ -56,27 +56,25 @@ JTC_ANCHORS = [
     (22.0, 420), (23.0, 320), (24.0, 240),
 ]
 
-# The Tower 10 tenant load is shipped as ZERO by operator decision -- only the
-# JTC common load is to be simulated. Flip this to False to write the day below
-# instead; nothing else needs changing, and the anchors are kept precisely so
-# that reversal stays a one-line edit.
-#
-# What zero costs: the EGC's third use-case caps charging at 1,750 kW minus the
-# T98 load, so with the tower at zero that cap can never bind and the multi-loop
-# cannot be exercised. Meter_01 also reads BESS - PV, showing PV export whenever
-# the battery is idle.
-T98_LOAD_ZERO = True
+# The Tower 10 tenant load IS simulated, in the 1,000-1,800 kW band the operator
+# gave for T98. Set this to True to ship a flat-zero day instead; the anchors
+# below are kept either way, so the switch stays a one-line edit in both
+# directions.
+T98_LOAD_ZERO = False
 
-# Tower 10 (T98) tenant load, behind the 2,500 kW transformer. Its working-hours
-# peak leaves about 190 kW of headroom under the 1,750 kW multi-loop limit, so a
-# BESS asking for its full 800 kW at that hour must be cut back (use-case 3),
-# while overnight there is room for the whole PCS.
+# Tower 10 (T98) tenant load, behind the 2,500 kW transformer. A tenant that
+# never really goes quiet: about 1,000 kW overnight, rising through the working
+# day to about 1,800 kW mid-afternoon. The band the operator gave is 1,000-1,800
+# kW, and it straddles the 1,750 kW multi-loop limit on purpose -- for most of
+# the working day the EGC's charge cap of `1,750 - T98` is already spent, and
+# around the peak the load alone is over the limit, so use-case 3 binds hard
+# rather than being merely reachable.
 T98_ANCHORS = [
-    (0.0, 280), (1.0, 265), (2.0, 255), (3.0, 250), (4.0, 248), (5.0, 255),
-    (6.0, 300), (7.0, 460), (8.0, 780), (9.0, 1080), (10.0, 1270),
-    (11.0, 1380), (12.0, 1330), (13.0, 1420), (14.0, 1510), (15.0, 1560),
-    (16.0, 1480), (17.0, 1300), (18.0, 1000), (19.0, 760), (20.0, 600),
-    (21.0, 470), (22.0, 380), (23.0, 320), (24.0, 280),
+    (0.0, 1075), (1.0, 1045), (2.0, 1025), (3.0, 1015), (4.0, 1015),
+    (5.0, 1035), (6.0, 1090), (7.0, 1195), (8.0, 1375), (9.0, 1545),
+    (10.0, 1655), (11.0, 1720), (12.0, 1680), (13.0, 1735), (14.0, 1780),
+    (15.0, 1805), (16.0, 1755), (17.0, 1640), (18.0, 1465), (19.0, 1315),
+    (20.0, 1230), (21.0, 1170), (22.0, 1130), (23.0, 1100), (24.0, 1075),
 ]
 
 # Rooftop PV: a clear-ish tropical day, generating 07:00-19:00, peaking a little
@@ -204,14 +202,18 @@ def main():
               % T98_LOOP)
         print('            cap has nothing to bind against. Set T98_LOAD_ZERO = False to restore it.')
     else:
-        print('use-case 3  T98 peak %.1f kW leaves %.1f kW under the %.0f kW multi-loop limit,'
-              % (max(t98), T98_LOOP - max(t98), T98_LOOP))
-        print('            so a %.0f kW charge request must be cut back for %.2f h of the day'
-              % (PCS, sum(STEP for v in t98 if T98_LOOP - v < PCS)))
-        night = min(t98)
-        print('            overnight T98 %.1f kW leaves %.1f kW, the whole PCS fits'
-              % (night, T98_LOOP - night))
-
+        peak, night = max(t98), min(t98)
+        capped = sum(STEP for v in t98 if T98_LOOP - v < PCS)
+        over = sum(STEP for v in t98 if v >= T98_LOOP)
+        print('use-case 3  T98 runs %.1f - %.1f kW against the %.0f kW multi-loop limit'
+              % (night, peak, T98_LOOP))
+        print('            the charge cap %.0f - T98 never reaches the %.0f kW PCS: %.1f kW of'
+              % (T98_LOOP, PCS, T98_LOOP - night))
+        print('            headroom at the overnight minimum, %.2f h of the day capped in all,'
+              % capped)
+        print('            and negative for %.2f h around the peak, where the loop can only be'
+              % over)
+        print('            held by discharging')
 
 if __name__ == '__main__':
     main()

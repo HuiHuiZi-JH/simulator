@@ -6,10 +6,10 @@ to have none, so midnight was silently thrown away; the generated files carry
 `hour,kW` now, and these tests pin that -- a regenerated file that lost its
 header would drop a point without failing anything else.
 
-The shipped `load_curve.csv` is all zeros by operator decision: only the JTC
-common load is simulated. The interpolation tests therefore run against their
-own fixture, not the shipped file, so the model stays covered whichever way the
-generator's T98_LOAD_ZERO switch is set.
+The shipped `load_curve.csv` is a simulated tenant day in the 1,000-1,800 kW
+band the operator gave for T98. The interpolation tests run against a fixture of
+their own rather than the shipped file, so the model stays covered whichever way
+the generator's T98_LOAD_ZERO switch is set.
 """
 import os
 import tempfile
@@ -33,21 +33,36 @@ class ShippedT98Load(unittest.TestCase):
         self.assertIn(0.0, self.m.power_curve)
         self.assertIn(24.0, self.m.power_curve)
 
-    def test_shipped_curve_is_zero_all_day(self):
-        # Deliberate: the Tower 10 tenant load is not simulated, so unit 8
-        # reads a flat zero and Meter_01 carries only PV and the battery. If
-        # this ever fails, someone regenerated with T98_LOAD_ZERO = False --
-        # which is a decision, not an accident, so update this test with it.
-        self.assertEqual(set(self.m.power_curve.values()), {0.0})
-        for i in range(0, 2400, 7):
-            self.assertEqual(self.m.interpolate_power(i / 100.0), 0.0)
+    def test_shipped_curve_runs_in_the_operator_band(self):
+        # The operator gave T98 as roughly 1,000-1,800 kW, and the curve is
+        # generated to sit inside that: a tenant that never goes quiet, with an
+        # overnight base and a mid-afternoon peak. If this fails, someone either
+        # reshaped T98_ANCHORS or set T98_LOAD_ZERO = True -- both decisions,
+        # not accidents, so update this test with them.
+        values = list(self.m.power_curve.values())
+        self.assertGreaterEqual(min(values), 1000.0)
+        self.assertLessEqual(max(values), 1800.0)
+        self.assertLess(min(values), 1100.0)        # the base really is the base
+        self.assertGreater(max(values), 1750.0)     # and the peak really is a peak
 
-    def test_zero_load_leaves_the_multi_loop_cap_unreachable(self):
-        # Recorded as a consequence rather than a defect: the EGC caps charging
-        # at 1,750 kW minus the T98 load, so at zero the whole PCS always fits
-        # and use-case 3 never binds.
+    def test_afternoon_peak_sits_above_the_overnight_base(self):
+        self.assertGreater(self.m.interpolate_power(14.5),
+                           self.m.interpolate_power(3.5) + 600.0)
+
+    def test_load_alone_crosses_the_multi_loop_limit(self):
+        # The consequence that makes use-case 3 worth having: around the peak
+        # the T98 load is over the 1,750 kW limit on its own, so the EGC's
+        # charge cap of `limit - load` is negative and only discharge holds the
+        # loop.
         peak = max(self.m.power_curve.values())
-        self.assertGreater(T98_LOOP_LIMIT - peak, PCS)
+        self.assertGreater(peak, T98_LOOP_LIMIT)
+
+    def test_charge_cap_never_admits_the_whole_pcs(self):
+        # Even at the overnight minimum the cap is under 800 kW, so a full-power
+        # charge request is cut back at every hour of the day.
+        headroom = T98_LOOP_LIMIT - max(self.m.power_curve.values())
+        self.assertLess(T98_LOOP_LIMIT - min(self.m.power_curve.values()), PCS)
+        self.assertLess(headroom, 0.0)
 
 
 class LoadInterpolation(unittest.TestCase):
