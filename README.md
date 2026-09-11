@@ -145,7 +145,7 @@ their type is added to the file.
 | `LoadModel` | `Load` | Replays a demand profile from CSV, interpolated linearly *between* its points at whatever instant it is asked for; or jitters 80–120% of base power; or holds a figure the operator typed in. Which of the three is a control register, not a config field, so it changes mid-run. |
 | `JTCLoadModel` | `JTCLoad` | The JTC common load — landlord and common services. Its own algorithm, sharing no code with `LoadModel`: an operator-supplied CSV read through `DayCurve`, linearly interpolated at any resolution and wrapped across midnight. No synthetic mode and no base power — the curve or nothing. |
 | `T7PVModel` | `T7PV` | Tower 7's PV plant, outside the Tower 10 network. The same direct `DayCurve` readout as the JTC common load, plus an integrated kWh total. No irradiance model, no synthetic arc, no curtailment input. |
-| `MeterModel` | `Meter` | **Derived.** Sums the other devices into net power at the point of common coupling, then integrates it on a monotonic clock into separate import and export counters. |
+| `MeterModel` | `Meter` | **Derived.** Sums the other devices into net power at the point of common coupling, then integrates it on a monotonic clock into separate import and export counters — by trapezoid, split at a zero crossing, through the shared `split_energy`. |
 | `VirtualGridModel` | `VirtualGrid` | **Derived.** Sums the JTC common load and the battery into the virtual grid incoming figure the EGC regulates against, with its own import and export counters and the three static settings. |
 
 Every model exposes the same contract: a constructor taking its slice of `device.json`, and an
@@ -294,8 +294,8 @@ pv_power   = Σ PV   + Σ |min(BESS, 0)|               discharging counts as gen
 
 ActivePower = load_power - pv_power   ⇒   Load + EV + BESS - PV
 
-ActivePower > 0:  APConsumedKWH   += ActivePower · Δt
-ActivePower < 0:  APProductionKWH += |ActivePower| · Δt
+APConsumedKWH   += imported      over the interval the last two readings bound
+APProductionKWH += exported      — see Directional energy, below
 ```
 
 Positive is import from the grid. `JTCLoad` and `T7PV` are not in the sum — they carry types
@@ -309,21 +309,54 @@ VG.ActivePower = Σ sign_i · P_i        over the configured sources
 default sources (no `sources` list): every JTCLoad and every BESS, sign +1
                                      ⇒ VG.ActivePower = JTC common load + BESS
 
-VG.ActivePower > 0:  VG.APConsumedKWH   += VG.ActivePower · Δt
-VG.ActivePower < 0:  VG.APProductionKWH += |VG.ActivePower| · Δt
+VG.APConsumedKWH   += imported   the same integration the Tower 10 meter uses
+VG.APProductionKWH += exported
 ```
 
 `VG.MaxImport`, `VG.BessZeroExport` and `VG.T98LoopLimit` are published unchanged from
 `device.json` — configuration passed through, not computed.
 
+### Directional energy — `split_energy`
+
+Both `MeterModel` and `VirtualGridModel` turn a *signed* power into two counters, and both do it
+through `src/models/energy.py` rather than each keeping its own arithmetic:
+
+```
+given P₀ (the previous reading), P₁ (this one) and Δt in hours:
+
+Δt ≤ 0 or Δt > 1 min          → nothing is booked; the interval is a gap, not an interval
+P₀ and P₁ on the same side    → one trapezoid:  ΔE = (P₀ + P₁)/2 · Δt   into that side's counter
+P₀ and P₁ across zero         → the crossing, then a triangle each side:
+                                t* = Δt · |P₀| / (|P₀| + |P₁|)
+                                |P₀|/2 · t*          into P₀'s counter
+                                |P₁|/2 · (Δt - t*)   into P₁'s counter
+```
+
+Each of the three clauses replaces something the plain `P_now · Δt` accumulation got wrong:
+
+- **The rectangle was charged at the wrong power.** The whole second was billed at the reading that
+  *ends* it. With Tower 10 now ramping about 800 kW across a day, every interval was biased the
+  same direction, 86,400 times a day. The trapezoid is exact for a power that moves linearly
+  between samples, which at a one-second tick it effectively does.
+- **A sign change inside an interval landed wholly in one bucket.** Commanding the battery from
+  −200 kW to +300 kW booked the entire second as import, when the site exported for the first 40%
+  of it. Both counters now take their share, so neither absorbs the other's energy.
+- **An absurd Δt went straight in.** A stalled cycle or a suspended host handed the counter hours
+  of elapsed time, and one tick added energy that never flowed. Anything longer than a minute is
+  logged and skipped instead.
+
+The counters stay monotonic and are still reset only by a restart. `test/test_energy.py` pins all
+three clauses, including that a day of intervals sums to the closed-form area under the curve.
+
 ### Energy integration — two different Δt
 
 This is worth knowing before trusting a kWh counter:
 
-| Model | Δt used |
-|---|---|
-| `MeterModel`, `VirtualGridModel`, `T7PVModel` | **measured**: `(time.monotonic() - last) / 3600` |
-| `PVModel`, `BatteryModel`, `EVModel` | **assumed**: a fixed `1/3600` h, i.e. exactly one second per tick |
+| Model | Δt used | Rule |
+|---|---|---|
+| `MeterModel`, `VirtualGridModel` | **measured**: `(time.monotonic() - last) / 3600` | trapezoid, split at a zero crossing |
+| `T7PVModel` | **measured**, the same way | rectangle — a PV plant never crosses zero |
+| `PVModel`, `BatteryModel`, `EVModel` | **assumed**: a fixed `1/3600` h, i.e. exactly one second per tick | rectangle |
 
 The tick loop sleeps a flat 1.0 s per cycle and does its work on top, so a cycle is always slightly
 longer than a second. The measured counters track that; the fixed-step ones quietly run slow by
@@ -614,6 +647,10 @@ that it covers every type in `config/modbus_registers.py`, lists each point once
 in register order, carries the descriptions from that file rather than a copy, and marks exactly
 the five control registers writable — named one by one, so adding a sixth is a decision rather
 than a number that quietly moves.
+`test/test_energy.py` covers the integration both sets of kWh counters run on: that a constant
+power is power × time, that a ramp is charged at its mean rather than at its end, that an interval
+crossing zero is divided between the two counters at the crossing, that a long gap books nothing,
+and that a day of intervals sums to the closed-form area under the curve.
 `test/test_load_modes.py` covers the load's three sources: that each one produces what it should,
 that switching to the curve loads a CSV the device never read at start-up, that a missing file
 falls back to the synthetic day rather than to a silent zero, that a stray mode is ignored, and
@@ -1196,10 +1233,12 @@ When a client sees a value it did not expect, the traffic log has the bytes.
 - **The battery has no loss model.** `voltage_nominal` and `resistance` are read from
   `device.json` and never used — no I²R heating, no round-trip efficiency, no taper near the SOC
   bounds. A kWh in is a kWh out. See Formulas.
-- **Energy counters integrate on two different clocks.** `MeterModel`, `VirtualGridModel` and
-  `T7PVModel` measure elapsed time; `PVModel`, `BatteryModel` and `EVModel` assume a fixed one
-  second per tick. The assumed ones run slightly slow, so the two sets never agree exactly. See
-  Formulas.
+- **Energy counters integrate on two different clocks, and by two different rules.** `MeterModel`,
+  `VirtualGridModel` and `T7PVModel` measure elapsed time; `PVModel`, `BatteryModel` and `EVModel`
+  assume a fixed one second per tick, so they run slightly slow. The two directional counters also
+  integrate by trapezoid now, while every other counter is still a rectangle. Both differences are
+  small and neither is hard to close — `split_energy` and a measured Δt would drop straight into
+  the other three models — but until they are, no two counters agree exactly. See Formulas.
 - **`EVModel` computes its two current figures inconsistently** — the phase currents divide by
   `3·V·pf` while the current setpoint divides by `V·pf`, so the setpoint reads three times the
   per-phase current for the same power. No EV device is configured, so nothing reads it today.
@@ -1215,6 +1254,7 @@ test/
   test_isolation.py              the Tower 10 loop is unaffected by the virtual point
   test_t98_load.py               the Tower 10 curve band, load interpolation, T10 PV
   test_load_modes.py             the load's three sources and the registers that switch them
+  test_energy.py                 directional energy: trapezoid, zero crossing, gap guard
   test_jtc_load.py               the JTC common load curve reader
   test_t7_pv.py                  the Tower 7 PV curve reader
   test_curve_upload.py           curve uploads: naming, parsing, replacement

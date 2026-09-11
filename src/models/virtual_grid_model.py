@@ -15,6 +15,8 @@ the Tower 10 meter; this model only reads, exactly like MeterModel.
 import logging
 import time
 
+from src.models.energy import split_energy
+
 logger = logging.getLogger('state')
 
 # Contribute every JTC common load and every battery when device.json does not
@@ -47,6 +49,7 @@ class VirtualGridModel:
         self.import_kwh = 0.0
         self.export_kwh = 0.0
         self._last_time = None
+        self._last_power = 0.0      # the reading that opens the next interval
         logger.info(
             "VirtualGridModel initialized for %s: max import = %.1f kW, "
             "BESS zero export = %.1f kW, T98 loop limit = %.1f kW, sources = %s",
@@ -104,10 +107,14 @@ class VirtualGridModel:
             with self.data_lock:
                 parts = self._contributions()
                 self.active_power = sum(power for _, power in parts)
-                if self.active_power > 0:
-                    self.import_kwh += self.active_power * dt_hours
-                elif self.active_power < 0:
-                    self.export_kwh += abs(self.active_power) * dt_hours
+                # The same integration the Tower 10 meter uses: a trapezoid over
+                # the interval, split at a zero crossing, with a stalled cycle
+                # booked as a gap rather than as energy. See src/models/energy.py.
+                imported, exported = split_energy(self._last_power,
+                                                  self.active_power, dt_hours)
+                self.import_kwh += imported
+                self.export_kwh += exported
+                self._last_power = self.active_power
         except Exception as e:
             logger.error("Error in VirtualGridModel update for %s: %s",
                          self.config.get('DeviceKey'), e)

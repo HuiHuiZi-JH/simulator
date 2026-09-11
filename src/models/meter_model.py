@@ -1,6 +1,8 @@
 import logging
 import time
 
+from src.models.energy import split_energy
+
 logger = logging.getLogger('state')
 
 class MeterModel:
@@ -16,6 +18,7 @@ class MeterModel:
         self.production_kwh = 0.0
         self.consumed_kwh = 0.0
         self._last_time = None
+        self._last_power = 0.0      # the reading that opens the next interval
         logger.info(f"MeterModel initialized for {config.get('DeviceKey')}: Start hour = {self.start_hour}, devices_data length: {len(devices_data)}")
 
     def update(self):
@@ -47,13 +50,16 @@ class MeterModel:
                 total_power = load_power - pv_power  # 反转符号，正值表示净消耗，负值表示净发电
                 self.total_power = total_power
 
-                # Integrate net power into the directional energy counters.
-                # total_power > 0 -> importing from grid -> consumed
-                # total_power < 0 -> exporting to grid   -> produced
-                if total_power > 0:
-                    self.consumed_kwh += total_power * dt_hours
-                elif total_power < 0:
-                    self.production_kwh += abs(total_power) * dt_hours
+                # Integrate net power into the directional energy counters over
+                # the interval the two readings bound -- see src/models/energy.py
+                # for why the trapezoid and the zero crossing are worth the
+                # arithmetic. Import is what the site consumed, export is what it
+                # produced back into the grid.
+                imported, exported = split_energy(self._last_power, total_power,
+                                                  dt_hours)
+                self.consumed_kwh += imported
+                self.production_kwh += exported
+                self._last_power = total_power
         except Exception as e:
             logger.error(f"Error in MeterModel update for {self.config.get('DeviceKey')}: {str(e)}")
             self.total_power = 0.0
