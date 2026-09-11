@@ -80,6 +80,9 @@ A demo host is not a development machine. It gets a build, not a checkout: one f
 the simulator, registers it with systemd and starts it, leaving no Python source behind to read or
 edit.
 
+`deploy.html` is this section written out as a page to hand to whoever does the install —
+same steps, same warnings, and it prints. This section stays the authority; the page follows it.
+
 ### Build a release
 
 On this machine, from the repository root:
@@ -1395,6 +1398,7 @@ utils/
   config_loader.py               JSON loader
   locks.py                       the shared data_lock
   make_curves.py                 regenerates all four CSVs from the design basis
+deploy.html                      the deploy manual as a page, for whoever installs on a host
 deploy/
   build_release.sh               builds the source-free installer into dist/
   install.sh                     runs on the host: unit file, enable, start

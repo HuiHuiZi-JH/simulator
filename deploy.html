@@ -1,0 +1,696 @@
+<title>MicroGrid Simulator — Deploy manual</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@500;600;700&family=IBM+Plex+Mono:wght@400;500;600&family=Source+Serif+4:opsz,wght@8..60,400;8..60,600&display=swap">
+
+<style>
+  :root {
+    --ground:   #EDF0F2;
+    --surface:  #FFFFFF;
+    --sunken:   #E3E8EB;
+    --ink:      #131C24;
+    --muted:    #566673;
+    --faint:    #7C8A95;
+    --line:     #D2DADF;
+    --hairline: #E1E7EA;
+    --accent:   #0E6E7D;
+    --accent-soft: #D8ECEF;
+    --gen:      #2C7F60;
+    --gen-soft: #DCEDE5;
+    --con:      #B04E2A;
+    --con-soft: #F5E3DA;
+    --shadow:   0 1px 2px rgba(19, 28, 36, .06), 0 8px 24px -12px rgba(19, 28, 36, .18);
+
+    --measure: 66ch;
+    --step-0: .9375rem;
+    --step-1: 1.0625rem;
+    --step-2: 1.375rem;
+    --step-3: 1.875rem;
+    --step-4: 2.5rem;
+    --step-5: clamp(2.75rem, 6vw, 4.25rem);
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --ground:   #0F151A;
+      --surface:  #161F26;
+      --sunken:   #121A20;
+      --ink:      #E2EAEF;
+      --muted:    #93A5B1;
+      --faint:    #758794;
+      --line:     #2A363F;
+      --hairline: #222D35;
+      --accent:   #46B4C6;
+      --accent-soft: #16323A;
+      --gen:      #56BE92;
+      --gen-soft: #14312657;
+      --con:      #E28A63;
+      --con-soft: #33201657;
+      --shadow:   0 1px 2px rgba(0, 0, 0, .4), 0 8px 24px -12px rgba(0, 0, 0, .7);
+    }
+  }
+
+  :root[data-theme="dark"] {
+    --ground:   #0F151A;
+    --surface:  #161F26;
+    --sunken:   #121A20;
+    --ink:      #E2EAEF;
+    --muted:    #93A5B1;
+    --faint:    #758794;
+    --line:     #2A363F;
+    --hairline: #222D35;
+    --accent:   #46B4C6;
+    --accent-soft: #16323A;
+    --gen:      #56BE92;
+    --gen-soft: #14312657;
+    --con:      #E28A63;
+    --con-soft: #33201657;
+    --shadow:   0 1px 2px rgba(0, 0, 0, .4), 0 8px 24px -12px rgba(0, 0, 0, .7);
+  }
+
+  * { box-sizing: border-box; }
+
+  body {
+    background: var(--ground);
+    color: var(--ink);
+    font-family: "Source Serif 4", Georgia, "Times New Roman", serif;
+    font-size: var(--step-1);
+    line-height: 1.62;
+    margin: 0;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  h1, h2, h3, .sans {
+    font-family: Archivo, "Helvetica Neue", Arial, sans-serif;
+    text-wrap: balance;
+  }
+
+  code, kbd, .mono {
+    font-family: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace;
+    font-variant-ligatures: none;
+  }
+
+  a { color: var(--accent); text-underline-offset: .18em; }
+  a:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; border-radius: 2px; }
+
+  /* ---------- shell ---------- */
+
+  .wrap {
+    max-width: 78rem;
+    margin: 0 auto;
+    padding: 0 clamp(1.15rem, 4vw, 3rem);
+  }
+
+  .col { max-width: var(--measure); }
+
+  main > section {
+    padding-block: clamp(2.6rem, 6vw, 4.5rem);
+    border-top: 1px solid var(--hairline);
+  }
+
+  .eyebrow {
+    font-family: Archivo, Arial, sans-serif;
+    font-size: .70rem;
+    font-weight: 600;
+    letter-spacing: .16em;
+    text-transform: uppercase;
+    color: var(--faint);
+    margin: 0 0 1.1rem;
+  }
+
+  h2 {
+    font-size: var(--step-3);
+    font-weight: 700;
+    letter-spacing: -.021em;
+    line-height: 1.16;
+    margin: 0 0 .85rem;
+  }
+
+  h3 {
+    font-size: var(--step-1);
+    font-weight: 600;
+    letter-spacing: -.005em;
+    margin: 0 0 .4rem;
+  }
+
+  p { margin: 0 0 1.05rem; }
+
+  .lede { font-size: var(--step-2); line-height: 1.5; color: var(--muted); }
+
+  /* ---------- masthead ---------- */
+
+  header.masthead { padding-block: clamp(3rem, 8vw, 5.5rem) clamp(2.2rem, 5vw, 3.5rem); }
+
+  .plate {
+    display: inline-flex;
+    align-items: center;
+    gap: .6rem;
+    font-family: "IBM Plex Mono", monospace;
+    font-size: .72rem;
+    font-weight: 500;
+    letter-spacing: .1em;
+    text-transform: uppercase;
+    color: var(--accent);
+    background: var(--accent-soft);
+    border: 1px solid color-mix(in srgb, var(--accent) 26%, transparent);
+    border-radius: 999px;
+    padding: .34rem .8rem;
+    margin-bottom: 1.6rem;
+  }
+
+  .plate::before {
+    content: "";
+    width: .42rem; height: .42rem;
+    border-radius: 50%;
+    background: var(--accent);
+  }
+
+  h1 {
+    font-size: var(--step-5);
+    font-weight: 700;
+    letter-spacing: -.033em;
+    line-height: .98;
+    margin: 0 0 1.1rem;
+  }
+
+  h1 .thin { font-weight: 500; color: var(--muted); display: block; }
+
+  .masthead .lede { max-width: 54ch; }
+
+  .facts {
+    display: flex;
+    flex-wrap: wrap;
+    gap: .5rem;
+    margin-top: 2.1rem;
+    padding: 0; list-style: none;
+  }
+
+  .facts li {
+    font-family: "IBM Plex Mono", monospace;
+    font-size: .76rem;
+    color: var(--muted);
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: 5px;
+    padding: .42rem .7rem;
+  }
+
+  .facts b { color: var(--ink); font-weight: 600; }
+
+  /* ---------- prose bits ---------- */
+
+  .note {
+    border-left: 2px solid var(--accent);
+    padding: .1rem 0 .1rem 1.05rem;
+    color: var(--muted);
+    font-size: var(--step-0);
+    margin: 0 0 1.05rem;
+  }
+  .note.warn { border-left-color: var(--con); }
+  .note b { color: var(--ink); font-weight: 600; }
+
+  ul.plain { margin: 0 0 1.05rem; padding-left: 1.15rem; }
+  ul.plain li { margin-bottom: .5rem; }
+
+  code {
+    font-size: .86em;
+    background: var(--sunken);
+    border-radius: 3px;
+    padding: .1em .34em;
+  }
+
+  pre {
+    background: var(--sunken);
+    border: 1px solid var(--hairline);
+    border-radius: 8px;
+    padding: 1.05rem 1.15rem;
+    overflow-x: auto;
+    margin: 0 0 1.05rem;
+  }
+  pre code {
+    background: none;
+    padding: 0;
+    font-size: .8125rem;
+    line-height: 1.62;
+    color: var(--ink);
+  }
+  .cmt { color: var(--faint); }
+  .str { color: var(--gen); }
+  .key { color: var(--accent); }
+
+  /* ---------- numbered steps ---------- */
+
+  .steps { counter-reset: step; list-style: none; margin: 2.2rem 0 0; padding: 0; }
+
+  .steps > li {
+    counter-increment: step;
+    position: relative;
+    padding-left: 3.1rem;
+    padding-bottom: 1.9rem;
+    border-left: 1px solid var(--hairline);
+    margin-left: 1.05rem;
+  }
+  .steps > li:last-child { border-left-color: transparent; padding-bottom: 0; }
+
+  .steps > li::before {
+    content: counter(step);
+    position: absolute;
+    left: -1.06rem;
+    top: -.1rem;
+    width: 2.1rem; height: 2.1rem;
+    display: grid; place-items: center;
+    font-family: "IBM Plex Mono", monospace;
+    font-size: .82rem;
+    font-weight: 600;
+    color: var(--accent);
+    background: var(--surface);
+    border: 1px solid color-mix(in srgb, var(--accent) 34%, transparent);
+    border-radius: 50%;
+  }
+
+  .steps h3 { margin-bottom: .35rem; }
+  .steps p { font-size: var(--step-0); color: var(--muted); margin-bottom: .8rem; }
+  .steps .col { max-width: 62ch; }
+
+  /* ---------- tables ---------- */
+
+  .panel {
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: 9px;
+    overflow: hidden;
+    margin-top: 2.2rem;
+  }
+
+  .panel-head {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: .6rem;
+    padding: .8rem 1rem;
+    border-bottom: 1px solid var(--hairline);
+    background: var(--sunken);
+  }
+
+  .panel-head h3 { margin: 0; font-size: .95rem; }
+  .panel-head .hint { font-family: "IBM Plex Mono", monospace; font-size: .72rem; color: var(--faint); }
+
+  .table-scroll { overflow-x: auto; }
+
+  table { width: 100%; border-collapse: collapse; font-family: "IBM Plex Mono", monospace; font-size: .755rem; }
+
+  th {
+    text-align: left;
+    font-weight: 500;
+    font-size: .655rem;
+    letter-spacing: .09em;
+    text-transform: uppercase;
+    color: var(--faint);
+    padding: .55rem 1rem;
+    border-bottom: 1px solid var(--hairline);
+    white-space: nowrap;
+  }
+
+  td { padding: .52rem 1rem; border-bottom: 1px solid var(--hairline); color: var(--muted); vertical-align: baseline; }
+  tr:last-child td { border-bottom: none; }
+  td.pt { color: var(--ink); white-space: nowrap; }
+  td.wide { white-space: normal; }
+
+  .tag {
+    display: inline-block;
+    font-size: .62rem;
+    font-weight: 600;
+    letter-spacing: .08em;
+    text-transform: uppercase;
+    border-radius: 3px;
+    padding: .06rem .38rem;
+  }
+  .tag.you { color: var(--accent); background: var(--accent-soft); }
+  .tag.host { color: var(--gen); background: var(--gen-soft); }
+  .tag.keep { color: var(--con); background: var(--con-soft); }
+
+  /* ---------- two-up ---------- */
+
+  .split {
+    display: grid;
+    gap: clamp(1.6rem, 4vw, 3rem);
+    grid-template-columns: repeat(auto-fit, minmax(17rem, 1fr));
+    margin-top: 2.2rem;
+  }
+  .split h3 { margin-bottom: .5rem; }
+  .split p { font-size: var(--step-0); color: var(--muted); }
+
+  /* ---------- footer ---------- */
+
+  footer {
+    border-top: 1px solid var(--hairline);
+    padding-block: 2.6rem 3.5rem;
+    font-size: .82rem;
+    color: var(--faint);
+    font-family: Archivo, Arial, sans-serif;
+  }
+
+  @media (prefers-reduced-motion: no-preference) {
+    a { transition: opacity .15s ease; }
+    a:hover { opacity: .72; }
+  }
+
+  @media print {
+    body { background: #fff; font-size: 10.5pt; }
+    main > section { border-top: 1px solid #ccc; padding-block: 1.2rem; break-inside: avoid; }
+    .steps > li { break-inside: avoid; }
+  }
+</style>
+
+<header class="masthead">
+  <div class="wrap">
+    <span class="plate">Deployment</span>
+    <h1>Deploy manual<span class="thin">MicroGrid Simulator on a host that never sees the source</span></h1>
+    <p class="lede">
+      A demo host is not a development machine. It gets a build, not a checkout: one file that
+      installs the simulator, registers it with systemd and starts it — with no Python source
+      left behind to read or edit.
+    </p>
+    <ul class="facts">
+      <li><b>One file</b> · ~106 kB</li>
+      <li><b>No dependencies</b> · standard library only</li>
+      <li><b>Modbus TCP</b> 5021</li>
+      <li><b>Dashboard</b> 8080</li>
+      <li><b>Installs to</b> /opt/microgridsim</li>
+    </ul>
+  </div>
+</header>
+
+<main>
+
+<section>
+  <div class="wrap">
+    <div class="col">
+      <p class="eyebrow">What ships</p>
+      <h2>The release is one self-extracting file</h2>
+      <p>
+        <code>dist/microgridsim-&lt;version&gt;-py&lt;X.Y&gt;.run</code> is a shell script with a
+        compressed payload stapled to the end of it. Run it as root and it unpacks itself into a
+        temporary directory, installs, and cleans up after itself.
+      </p>
+    </div>
+
+    <div class="panel">
+      <div class="panel-head">
+        <h3>Inside the release</h3>
+        <span class="hint">no .py files</span>
+      </div>
+      <div class="table-scroll">
+        <table>
+          <thead>
+            <tr><th>File</th><th>What it is</th></tr>
+          </thead>
+          <tbody>
+            <tr><td class="pt">microgridsim.pyz</td><td class="wide">Every module compiled to bytecode, zipped, with a shebang. This is the program.</td></tr>
+            <tr><td class="pt">config/</td><td class="wide"><code>device.json</code>, the four day curves, log settings — the operator's files, edited on the host.</td></tr>
+            <tr><td class="pt">web/index.html</td><td class="wide">The dashboard. Browsers have to read it, so it is never secret.</td></tr>
+            <tr><td class="pt">MicroGridSimulator.service</td><td class="wide">The systemd unit, with <code>@PREFIX@</code> and <code>@PYTHON@</code> still to be filled in.</td></tr>
+            <tr><td class="pt">install.sh</td><td class="wide">The four install steps, carried out for you.</td></tr>
+            <tr><td class="pt">PYTHON_VERSION</td><td class="wide">The Python minor version this release was built for. Checked before anything is installed.</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="split">
+      <div>
+        <h3>What is not in it</h3>
+        <p>
+          No <code>.py</code> sources, no tests, no design documents, no git history. The build
+          compiles each module with <code>compileall -o 2</code> — which also strips docstrings —
+          deletes the sources, and rewrites the path recorded in each <code>.pyc</code> so a
+          traceback on the host names the module and not your build machine.
+        </p>
+      </div>
+      <div>
+        <h3>What that does and does not buy</h3>
+        <p>
+          It stops browsing, not a determined reader. <b>Bytecode is hidden, not encrypted</b>:
+          someone with root on the host can decompile it if they want to. Nothing that must stay
+          secret belongs on a machine you do not control.
+        </p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section>
+  <div class="wrap">
+    <div class="col">
+      <p class="eyebrow">Procedure</p>
+      <h2>Build, copy, install</h2>
+      <p>
+        Steps 1 and 2 happen on the development machine. Steps 3 onward happen on the host, as
+        root — or rather, they happen for you: the installer runs them.
+      </p>
+    </div>
+
+    <ol class="steps">
+      <li>
+        <div class="col">
+          <h3><span class="tag you">Your machine</span> &nbsp;Build the release</h3>
+          <p>From the repository root. Omit the version and it takes one from <code>git describe</code>.</p>
+          <pre><code>cd /home/agent-ah/simulator/microgridsimulate
+./deploy/build_release.sh v1.2
+
+<span class="cmt">→ dist/microgridsim-v1.2-py3.12.run</span></code></pre>
+        </div>
+      </li>
+
+      <li>
+        <div class="col">
+          <h3><span class="tag you">Your machine</span> &nbsp;Check the host's Python first</h3>
+          <p>
+            Bytecode only loads on the <b>minor version</b> that compiled it. A release built on
+            3.12 runs on 3.12 and nowhere else.
+          </p>
+          <pre><code>ssh user@host python3 -V      <span class="cmt"># must match the py3.12 in the filename</span></code></pre>
+          <p class="note">
+            If it does not match, install a matching <code>python3</code> on the host, or rebuild
+            the release on a machine whose <code>python3</code> matches it. The installer checks
+            this itself and refuses before touching anything, so a mismatch costs you one sentence
+            — not a service that restarts forever.
+          </p>
+        </div>
+      </li>
+
+      <li>
+        <div class="col">
+          <h3><span class="tag host">Host</span> &nbsp;Copy it over and run it as root</h3>
+          <p>Two commands. Everything below happens inside the second one.</p>
+          <pre><code>scp dist/microgridsim-v1.2-py3.12.run user@host:~/
+ssh user@host <span class="str">'sudo ~/microgridsim-v1.2-py3.12.run'</span></code></pre>
+        </div>
+      </li>
+
+      <li>
+        <div class="col">
+          <h3><span class="tag host">Host</span> &nbsp;The unit file goes into place</h3>
+          <p>
+            Written to <code>/lib/systemd/system/</code> with this install's prefix and
+            <code>python3</code> path substituted in, then systemd is told to pick it up.
+          </p>
+          <pre><code><span class="cmt"># install.sh, on your behalf</span>
+sed s|@PREFIX@|/opt/microgridsim|g MicroGridSimulator.service \
+    &gt; /lib/systemd/system/MicroGridSimulator.service
+systemctl daemon-reload</code></pre>
+        </div>
+      </li>
+
+      <li>
+        <div class="col">
+          <h3><span class="tag host">Host</span> &nbsp;Enabled for boot, then started</h3>
+          <p>开机自动启动 — and a <code>restart</code> rather than a <code>start</code>, so running the
+            installer again on a live host is an upgrade rather than an error.</p>
+          <pre><code>systemctl enable MicroGridSimulator.service
+systemctl restart MicroGridSimulator.service
+systemctl status MicroGridSimulator.service --no-pager</code></pre>
+        </div>
+      </li>
+    </ol>
+
+    <div class="col" style="margin-top:2.4rem">
+      <h3>Installing somewhere other than /opt</h3>
+      <p style="font-size:var(--step-0);color:var(--muted)">
+        Two environment variables, needed only if the site's layout differs. <code>sudo -E</code>
+        passes them through.
+      </p>
+      <pre><code>PREFIX=/srv/microgridsim   sudo -E ./microgridsim-v1.2-py3.12.run
+UNIT_DIR=/etc/systemd/system sudo -E ./microgridsim-v1.2-py3.12.run</code></pre>
+    </div>
+  </div>
+</section>
+
+<section>
+  <div class="wrap">
+    <div class="col">
+      <p class="eyebrow">After the install</p>
+      <h2>Where everything lives</h2>
+      <p>
+        The tree is root-only — <code>0700</code> directories and a <code>0400</code> archive. The
+        service runs as root, and nothing else on the host needs to read it.
+      </p>
+    </div>
+
+    <pre style="margin-top:1.6rem"><code>/opt/microgridsim/
+  microgridsim.pyz    <span class="cmt">the program — bytecode, 0400 root</span>
+  config/             <span class="cmt">device.json and the curves — edit here or from the dashboard</span>
+  web/index.html      <span class="cmt">the dashboard</span>
+  log/                <span class="cmt">simulation.log, message.log, modbus_traffic.log</span></code></pre>
+
+    <p class="note">
+      <b>WorkingDirectory in the unit is the prefix, and that matters.</b> The program reads
+      <code>config/</code> by a relative path and takes <code>web/</code> from the working
+      directory when it runs out of the archive. Started by hand from somewhere else, it would look
+      for its configuration in the wrong place.
+    </p>
+
+    <div class="panel">
+      <div class="panel-head">
+        <h3>Day-to-day commands</h3>
+        <span class="hint">on the host</span>
+      </div>
+      <div class="table-scroll">
+        <table>
+          <thead>
+            <tr><th>To</th><th>Run</th></tr>
+          </thead>
+          <tbody>
+            <tr><td class="wide">Check it is running</td><td class="pt">systemctl status MicroGridSimulator.service</td></tr>
+            <tr><td class="wide">Watch it live</td><td class="pt">journalctl -u MicroGridSimulator.service -f</td></tr>
+            <tr><td class="wide">Read the simulation log</td><td class="pt">tail -f /opt/microgridsim/log/simulation.log</td></tr>
+            <tr><td class="wide">Restart after editing device.json</td><td class="pt">systemctl restart MicroGridSimulator.service</td></tr>
+            <tr><td class="wide">Stop it, and stop it starting at boot</td><td class="pt">systemctl disable --now MicroGridSimulator.service</td></tr>
+            <tr><td class="wide">Remove it entirely</td><td class="pt">rm -rf /opt/microgridsim /lib/systemd/system/MicroGridSimulator.service</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="panel">
+      <div class="panel-head">
+        <h3>Checking it actually answers</h3>
+        <span class="hint">from any machine that can reach the host</span>
+      </div>
+      <div class="table-scroll">
+        <table>
+          <thead>
+            <tr><th>Interface</th><th>Address</th><th>What you should see</th></tr>
+          </thead>
+          <tbody>
+            <tr><td class="pt">Web dashboard</td><td class="pt">http://&lt;host&gt;:8080</td><td class="wide">Live device cards, the site diagram, the trend chart</td></tr>
+            <tr><td class="pt">JSON API</td><td class="pt">http://&lt;host&gt;:8080/api/state</td><td class="wide">One object per device, updated every second</td></tr>
+            <tr><td class="pt">Modbus TCP</td><td class="pt">&lt;host&gt;:5021</td><td class="wide">Unit 1, address 0, quantity 2 → net active power as a signed 32-bit integer; divide by 100 for kW. Positive is import, negative is export.</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <p class="note warn" style="margin-top:1.6rem">
+      <b>Open 5021 and 8080 to whoever must reach the simulator, and nothing else.</b> Both servers
+      bind <code>0.0.0.0</code> and neither asks for a password — anyone who can reach the
+      dashboard can change a setpoint.
+    </p>
+  </div>
+</section>
+
+<section>
+  <div class="wrap">
+    <div class="col">
+      <p class="eyebrow">Later</p>
+      <h2>Upgrading and removing</h2>
+      <p>
+        Run a newer <code>.run</code> file on the same host. The archive and <code>web/</code> are
+        replaced; <code>config/</code> is not.
+      </p>
+    </div>
+
+    <div class="split">
+      <div>
+        <h3>What an upgrade keeps</h3>
+        <p>
+          Every file already in <code>config/</code> stays as it is, and is named on the way past
+          (<code class="mono">keeping existing config/device.json</code>). A site's settings and its
+          uploaded curves survive. Only files that are <em>missing</em> are seeded from the release.
+        </p>
+        <p>
+          Which also means a corrected default curve will not overwrite one the site has already
+          edited. Delete the file on the host first if you want the new one.
+        </p>
+      </div>
+      <div>
+        <h3>What it replaces</h3>
+        <p>
+          The bytecode archive, the dashboard, and the unit file — then the service is restarted, so
+          the upgrade lands without a second command.
+        </p>
+        <pre style="margin-top:1rem"><code>scp dist/microgridsim-v1.3-py3.12.run user@host:~/
+ssh user@host <span class="str">'sudo ~/microgridsim-v1.3-py3.12.run'</span></code></pre>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section>
+  <div class="wrap">
+    <div class="col">
+      <p class="eyebrow">If it does not start</p>
+      <h2>The four things that actually go wrong</h2>
+    </div>
+
+    <div class="panel">
+      <div class="panel-head">
+        <h3>Symptom → cause → fix</h3>
+        <span class="hint">journalctl -u MicroGridSimulator.service</span>
+      </div>
+      <div class="table-scroll">
+        <table>
+          <thead>
+            <tr><th>What you see</th><th>What it means</th><th>What to do</th></tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td class="wide">Installer refuses: <em>built for Python 3.12, but python3 is 3.11</em></td>
+              <td class="wide">Bytecode is tied to a Python minor version</td>
+              <td class="wide">Install a matching <code>python3</code>, or rebuild the release on a machine that matches the host</td>
+            </tr>
+            <tr>
+              <td class="wide"><code>bad magic number</code> in the journal</td>
+              <td class="wide">Same cause, reached the hard way — the host's <code>python3</code> changed after installation</td>
+              <td class="wide">Rebuild and reinstall against the host's current <code>python3</code></td>
+            </tr>
+            <tr>
+              <td class="wide"><code>Address already in use</code>, then the service exits</td>
+              <td class="wide">Something else holds 5021 or 8080 — often an older copy started by hand</td>
+              <td class="wide"><code>ss -ltnp | grep -E '5021|8080'</code>, stop that process, then <code>systemctl restart</code></td>
+            </tr>
+            <tr>
+              <td class="wide">Service runs, dashboard unreachable</td>
+              <td class="wide">Firewall, not the simulator — it binds <code>0.0.0.0</code></td>
+              <td class="wide">Confirm with <code>curl -s localhost:8080/api/state</code> on the host, then open the port</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <p class="note" style="margin-top:1.8rem">
+      <b>The host needs no third-party packages.</b> The release is standard library only, like the
+      source it came from. If an install fails for a reason that is not in this table, the message
+      from <code>install.sh</code> or the journal will say so in one line — it is written to.
+    </p>
+  </div>
+</section>
+
+</main>
+
+<footer>
+  <div class="wrap">
+    MicroGrid Simulator · deploy manual · the authority for these rules is README.md § Deployment
+  </div>
+</footer>
