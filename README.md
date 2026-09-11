@@ -68,8 +68,112 @@ To read the meter: unit 1, address 0, quantity 2 returns net active power as a s
 integer — divide by 100 for kW. Positive means the site is importing from the grid, negative
 means exporting.
 
-To run as a service, edit the paths in `MicroGridSimulator.service` to match your checkout, then
-install it with systemd. It restarts on failure and routes output to syslog.
+To run a checkout as a service on this machine, edit the paths in
+`MicroGridSimulator.service` to match it and install that unit with systemd. To put the simulator
+on a machine that should not have the source on it, see **Deployment** below.
+
+---
+
+## Deployment
+
+A demo host is not a development machine. It gets a build, not a checkout: one file that installs
+the simulator, registers it with systemd and starts it, leaving no Python source behind to read or
+edit.
+
+### Build a release
+
+On this machine, from the repository root:
+
+```
+./deploy/build_release.sh            # version taken from git describe
+./deploy/build_release.sh v1.2       # or name it yourself
+```
+
+That writes `dist/microgridsim-<version>-py<X.Y>.run` — a self-extracting installer of about
+110 kB holding:
+
+| In the release | What it is |
+|---|---|
+| `microgridsim.pyz` | every module compiled to bytecode, zipped, with a shebang — the program |
+| `config/` | `device.json`, the four day curves, log settings — the operator's files |
+| `web/index.html` | the dashboard, which browsers must read anyway |
+| `MicroGridSimulator.service` | the systemd unit, with `@PREFIX@` and `@PYTHON@` still to fill in |
+| `install.sh` | the four install steps, run for you |
+
+No `.py` file is in it. `build_release.sh` compiles each module with `compileall -o 2`, deletes the
+sources, and rewrites the path recorded in each `.pyc` to `microgridsim/...` so a traceback on the
+host names the module without naming the build machine. Docstrings are stripped by `-o 2`.
+
+**This hides the code; it does not encrypt it.** Bytecode can be decompiled by someone with root
+on the host who wants to. It stops browsing, not a determined reader — so nothing that must stay
+secret belongs on a host you do not control. The `.docx` design documents are not in the release
+for that reason, and neither are the tests.
+
+### Install on the host
+
+Copy the one file over and run it as root:
+
+```
+scp dist/microgridsim-v1.2-py3.12.run user@host:~/
+ssh user@host 'sudo ~/microgridsim-v1.2-py3.12.run'
+```
+
+`install.sh` unpacks into `/opt/microgridsim` and carries out the procedure:
+
+1. Write `/lib/systemd/system/MicroGridSimulator.service`, with this install's prefix and
+   `python3` path substituted in
+2. `systemctl daemon-reload` — pick the unit up
+3. `systemctl enable MicroGridSimulator.service` — 开机自动启动, start at boot
+4. `systemctl restart` it, then print `systemctl status`
+
+Two environment variables change where things land, and are only needed if `/opt` is wrong for the
+site:
+
+```
+PREFIX=/srv/microgridsim sudo -E ./microgridsim-v1.2-py3.12.run
+UNIT_DIR=/etc/systemd/system sudo -E ./microgridsim-v1.2-py3.12.run
+```
+
+The installed tree is root-only — `0700` directories and a `0400` archive. The service runs as
+root and nothing else on the host needs to read it.
+
+```
+/opt/microgridsim/
+  microgridsim.pyz    the program, 0400 root
+  config/             device.json and the curves — edited here or from the dashboard
+  web/index.html      the dashboard
+  log/                simulation.log, message.log, modbus_traffic.log
+```
+
+`WorkingDirectory` in the unit is the prefix, and that matters: the code reads `config/` by a
+relative path, and the web server takes `web/` and `config/` from beside the package in a checkout
+but from the working directory when it is running out of the archive — where no such directory
+exists. Started by hand from somewhere else, the simulator would look for its config in the wrong
+place.
+
+### Upgrading and removing
+
+Run a newer `.run` file on the same host. The archive and `web/` are replaced; `config/` is not —
+every file already there is kept and named on the way past, so a site's `device.json` and its
+uploaded curves survive an upgrade. Only files that are missing get seeded from the release. The
+service is restarted at the end, so the upgrade lands without a second command.
+
+```
+systemctl disable --now MicroGridSimulator.service      # stop it, and stop it starting at boot
+rm -rf /opt/microgridsim /lib/systemd/system/MicroGridSimulator.service
+```
+
+### The one thing that can go wrong
+
+Bytecode is tied to a Python **minor** version: a release built on 3.12 runs only on 3.12. The
+version is recorded in the release and `install.sh` compares it against the host's `python3`
+before it touches anything, so a mismatch is one sentence at install time rather than a service
+that restarts forever. Build on a machine whose `python3` matches the host's, or install a
+matching `python3` there.
+
+The host needs no third-party packages — the release is standard library only, like the source.
+Open TCP 5021 and 8080 to whoever must reach the simulator, and nothing else: both servers bind
+`0.0.0.0` and neither asks for a password.
 
 ---
 
@@ -1291,7 +1395,11 @@ utils/
   config_loader.py               JSON loader
   locks.py                       the shared data_lock
   make_curves.py                 regenerates all four CSVs from the design basis
+deploy/
+  build_release.sh               builds the source-free installer into dist/
+  install.sh                     runs on the host: unit file, enable, start
+  MicroGridSimulator.service     unit template; @PREFIX@ and @PYTHON@ filled in at install
 introduction.html                illustrated overview of the system
 JTC_Archi_Diagram.png            the site architecture this simulator stands in for
-MicroGridSimulator.service       systemd unit
+MicroGridSimulator.service       systemd unit for a checkout (see deploy/ for hosts)
 ```

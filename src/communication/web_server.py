@@ -22,8 +22,16 @@ from src.models.curve import parse_points
 
 logger = logging.getLogger('message')
 
-PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(
+# A source checkout keeps web/ and config/ beside the package, so the project
+# root is two directories up from this file. A packaged release keeps the code
+# inside a zipapp, where that path points *into* the archive and no such
+# directory exists; there the editable files sit in the working directory,
+# which systemd sets to the install prefix. One check tells the two apart.
+_PACKAGE_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(
     os.path.abspath(__file__))))
+PROJECT_ROOT = (_PACKAGE_ROOT
+                if os.path.isdir(os.path.join(_PACKAGE_ROOT, 'web'))
+                else os.getcwd())
 WEB_ROOT = os.path.join(PROJECT_ROOT, 'web')
 CONFIG_DIR = os.path.join(PROJECT_ROOT, 'config')
 CONFIG_PATH = os.path.join(CONFIG_DIR, 'device.json')
