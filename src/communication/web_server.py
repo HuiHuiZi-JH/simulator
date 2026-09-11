@@ -204,6 +204,27 @@ def validate_config(cfg):
     return errors
 
 
+def point_catalogue():
+    """Every point each device type publishes: what it means, where it sits.
+
+    The dashboard's detail panel needs the descriptions and register offsets
+    from `REGISTERS`, which the one-second state poll has no business carrying --
+    they never change. Fetched once when the diagram is first drawn.
+    """
+    out = {}
+    for dev_type, spec in REGISTERS.items():
+        describe = spec.get('descriptions', {})
+        writable = WRITABLE.get(dev_type, {})
+        out[dev_type] = [
+            {'name': name, 'offset': offset,
+             'description': describe.get(name, ''),
+             'writable': name in writable}
+            for name, offset in sorted(spec.get('points', {}).items(),
+                                       key=lambda item: item[1])
+        ]
+    return out
+
+
 def list_curves():
     """Every readable curve in config/, so the editor can offer them by name.
 
@@ -435,6 +456,8 @@ class WebServer:
                     self._json(200, server.snapshot())
                 elif self.path.startswith('/api/history'):
                     self._json(200, server.history_dump(self.path))
+                elif self.path.startswith('/api/points'):
+                    self._json(200, {'types': point_catalogue()})
                 elif self.path.startswith('/api/curves'):
                     self._json(200, {'curves': list_curves(), 'dir': 'config'})
                 elif self.path.startswith('/api/config'):

@@ -41,6 +41,9 @@ No third-party dependencies. Python 3, standard library only.
   CVD and ΔE 15 under normal vision. Three light-mode hues fall below 3:1 contrast, which is why
   the chart ships direct labels and a table view rather than leaving colour to carry meaning alone.
   Changing a slot means re-running that check, and a ninth series is never a new hue.
+- **The site diagram adds no hues either.** Its boxes and links reuse the `--gen` / `--con` /
+  `--accent` roles the device cards already use, so the palette stays the validated one and a node
+  means the same thing as the card for the same device.
 
 ---
 
@@ -589,6 +592,10 @@ for Tower 7, and the isolation suite asserts that 150 kW of T7 generation moves 
 `test/test_history.py` covers the rolling ring behind the trend chart: that it stays bounded, that
 an incremental read joins up with what a browser already holds, and that a late tick takes its
 sample without shifting the cadence of the ones after it.
+`test/test_dashboard_api.py` pins the point catalogue the diagram's detail panel is built on:
+that it covers every type in `config/modbus_registers.py`, lists each point once at its own offset
+in register order, carries the descriptions from that file rather than a copy, and marks exactly
+the three control registers writable.
 `test/test_curve_upload.py` covers the one path where a file the models depend on arrives from
 outside the repository: that an upload lands in `config/` and nowhere else however it is named,
 that what the dashboard accepts is exactly what `DayCurve` then reads back, that an unusable or
@@ -718,6 +725,30 @@ The chart polls `/api/history` only while its tab is open, and asks for `?after=
 fetches the handful of samples it is missing rather than the whole day. A restart resets the
 sequence counter; the client notices the discontinuity and refetches in full.
 
+**The site diagram** sits between the coupling-point figure and the device cards, and draws the
+shipped device set as one live single line: the JTC common load and the virtual grid point above
+the EGC control boundary, the Tower 10 loop below it — grid, meter, T98 LV bus, and the devices
+hung off that bus. Every box carries its own headline power, tinted the way the cards are: green
+generating, orange drawing, grey idle. Links animate in the direction power is actually flowing,
+from the sign of the value, and stand still when a device is at zero.
+
+The diagram is drawn from the snapshot, not from a fixed picture of the shipped config: boxes are
+placed by band and type, so a second battery, a charger added back, or a Tower 7 PV device appears
+in its own slot without the file being edited. The one link that crosses the boundary is the
+battery's, because the battery is the one device on both sides of it — in the Tower 10 meter sum,
+and moving the virtual grid point.
+
+**The detail panel** beside it follows the selection. Click a box — or tab to it and press Enter —
+and the panel names the device, its unit, which side of the boundary it is on, its headline value
+and state, what it is, the formula it is computed by, and then **every register it publishes**:
+name, description and live value, with `W` against the three that accept writes. The bus and the
+grid are selectable too; the bus lists what is on it, the grid shows the meter's reading and its
+energy counters. For a device with a control, **Open controls** scrolls to its card below.
+
+What the panel says about each device is what this README says: the descriptions come from
+`config/modbus_registers.py` through `GET /api/points`, and the notes restate the Site model
+section. Nothing in the diagram is a second description of the model that could drift from it.
+
 The open tab is in the URL — `#live`, `#trends`, `#config` — so a reload comes back where you were
 and a link can point at one.
 
@@ -761,6 +792,7 @@ Restarting re-reads `device.json` and resets SOC, energy counters, and the simul
 | `POST` | `/api/control` | Write one control register |
 | `GET` | `/api/config` | Current `device.json`, the editable field schema, and the restart flag |
 | `POST` | `/api/config` | Validate and write `device.json` |
+| `GET` | `/api/points` | Every point each device type publishes: description, register offset, writable |
 | `GET` | `/api/curves` | The readable day curves in `config/`, with point count and range |
 | `POST` | `/api/curve` | Validate an uploaded day curve and write it into `config/` |
 | `POST` | `/api/restart` | Restart the simulator in place |
@@ -1088,6 +1120,7 @@ test/
   test_jtc_load.py               the JTC common load curve reader
   test_t7_pv.py                  the Tower 7 PV curve reader
   test_curve_upload.py           curve uploads: naming, parsing, replacement
+  test_dashboard_api.py          the point catalogue behind the diagram panel
 config/
   device.json                    site definition
   modbus_registers.py            point name → register offset
