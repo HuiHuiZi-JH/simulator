@@ -98,10 +98,14 @@ REGISTERS = {
     "Load": {
         "base_addr": 0,
         "points": {
-            "Load.Power": 0
+            "Load.Power": 0,
+            "Load.ModeSet": 2,
+            "Load.PowerSet": 4
         },
         "descriptions": {
-            "Load.Power": "Load Power"
+            "Load.Power": "Load Power",
+            "Load.ModeSet": "Source: 0 = CSV curve, 1 = simulated, 2 = manual (writable)",
+            "Load.PowerSet": "Manual load power (kW), used when the source is 2 (writable)"
         }
     },
     "JTCLoad": {

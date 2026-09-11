@@ -263,6 +263,7 @@
   }
   .segmented button[aria-pressed="true"] { background:var(--surface); color:var(--ink); }
   .segmented button:hover { color:var(--ink); }
+  .ctl .segmented { flex-wrap:wrap; align-self:flex-start; max-width:100%; }
 
   .chartcard {
     background:var(--surface); border:1px solid var(--line); border-radius:12px;
@@ -808,7 +809,14 @@
     Load: {
       title: "Building Load", role: "is-con",
       primary: "Load.Power",
-      rows: []
+      rows: [],
+      // Three sources, switched live through Load.ModeSet; the manual entry
+      // appears only for the one that reads it.
+      source: {
+        point: "Load.ModeSet", label: "Source", manual: 2,
+        options: [[0, "CSV curve"], [1, "Simulated"], [2, "Manual"]],
+        entry: { point: "Load.PowerSet", label: "Manual power (kW)" }
+      }
     },
     JTCLoad: {
       title: "JTC Common Load", role: "is-con",
@@ -871,6 +879,27 @@
       html += '</dl>';
     }
 
+    if (spec.source) {
+      var sc = spec.source;
+      html +=
+        '<div class="ctl">' +
+          '<div class="ctl-label"><span>' + sc.label + '</span>' +
+          '<b data-f="srcval">—</b></div>' +
+          '<div class="segmented" role="group" aria-label="' + sc.label +
+            ' for ' + dev.key + '">' +
+            sc.options.map(function (o) {
+              return '<button type="button" data-mode="' + o[0] +
+                     '" aria-pressed="false">' + o[1] + '</button>';
+            }).join("") +
+          '</div>' +
+          '<div class="ctl-row" data-f="manualrow" hidden>' +
+            '<input type="number" data-entry="num" min="0" step="1" value="0" ' +
+              'aria-label="' + sc.entry.label + ' for ' + dev.key + '">' +
+            '<button data-entry="apply">Set</button>' +
+          '</div>' +
+        '</div>';
+    }
+
     if (spec.control) {
       var c = spec.control;
       var max = (c.maxFrom && dev.limits[c.maxFrom]) || c.fallbackMax;
@@ -890,6 +919,41 @@
     }
 
     el.innerHTML = html;
+
+    // One writer for both of the load's registers: the mode buttons and the
+    // manual value go the same way a Modbus write would, through /api/control.
+    function send(point, value) {
+      var pkey = dev.key + "|" + point;
+      pending[pkey] = true;
+      return fetch("/api/control", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ device: dev.key, point: point, value: value })
+      }).then(function (r) { return r.json(); }).then(function (res) {
+        toast(res.message || (res.ok ? "Applied" : "Rejected"), !res.ok);
+      }).catch(function (e) {
+        toast("Could not reach the simulator: " + e.message, true);
+      }).then(function () { delete pending[pkey]; });
+    }
+
+    if (spec.source) {
+      var src = spec.source;
+      el.querySelectorAll("[data-mode]").forEach(function (b) {
+        b.addEventListener("click", function () {
+          send(src.point, parseInt(b.getAttribute("data-mode"), 10));
+        });
+      });
+      var mnum = el.querySelector('[data-entry="num"]');
+      mnum.addEventListener("input", function () {
+        pending[dev.key + "|" + src.entry.point] = true;
+      });
+      el.querySelector('[data-entry="apply"]').addEventListener("click", function () {
+        var v = parseFloat(mnum.value);
+        if (isNaN(v)) { toast("Enter a number first", true); return; }
+        if (v < 0) { toast("A load cannot be negative", true); return; }
+        send(src.entry.point, v);
+      });
+    }
 
     if (spec.control) {
       var range = el.querySelector('[data-ctl="range"]');
@@ -955,6 +1019,24 @@
       if (cell) cell.textContent = fmt(p[r[1]], r[3]) + " " + r[2];
     });
 
+    if (spec.source) {
+      var sp = spec.source, mode = Math.round(p[sp.point] || 0), name = "—";
+      sp.options.forEach(function (o) { if (o[0] === mode) name = o[1]; });
+      el.querySelector('[data-f="srcval"]').textContent = name;
+      if (!pending[dev.key + "|" + sp.point]) {
+        el.querySelectorAll("[data-mode]").forEach(function (b) {
+          b.setAttribute("aria-pressed",
+            parseInt(b.getAttribute("data-mode"), 10) === mode ? "true" : "false");
+        });
+      }
+      // The entry is only shown for the source that reads it, so the card never
+      // offers a number that would go nowhere.
+      el.querySelector('[data-f="manualrow"]').hidden = mode !== sp.manual;
+      if (!pending[dev.key + "|" + sp.entry.point]) {
+        el.querySelector('[data-entry="num"]').value = fmt(p[sp.entry.point]);
+      }
+    }
+
     if (spec.control) {
       var live = p[spec.control.point] || 0;
       el.querySelector('[data-f="ctlval"]').textContent = fmt(live) + " kW";
@@ -999,10 +1081,12 @@
       formula: "INV.GenActivePW = curve(sim_hour) × ratedPower, capped by INV.LimitPower"
     },
     Load: {
-      what: "The Tower 10 tenant load, behind the T98 transformer. The shipped curve runs from " +
-            "about 1,000 kW overnight to about 1,800 kW mid-afternoon, so the peak crosses the " +
-            "1,750 kW multi-loop limit on its own.",
-      formula: "Load.Power = curve(sim_hour)"
+      what: "The Tower 10 tenant load, behind the T98 transformer. It runs from one of three " +
+            "sources, switchable live on its card: the CSV curve — shipped as about 1,000 kW " +
+            "overnight rising to about 1,800 kW mid-afternoon, so its peak crosses the 1,750 kW " +
+            "multi-loop limit on its own — a synthetic day around the base power, or a number " +
+            "the operator types in.",
+      formula: "Load.Power = curve(sim_hour) · base × 0.8-1.2 · Load.PowerSet"
     },
     EV: {
       what: "An EV charger on the T98 bus. The meter counts it as consumption alongside the " +
@@ -1575,9 +1659,12 @@
     return i;
   }
 
-  function modeInput(dev, key) {
+  function modeInput(dev, key, type) {
     var sel = document.createElement("select");
-    [["0", "CSV curve"], ["1", "Synthetic"]].forEach(function (o) {
+    var opts = [["0", "CSV curve"], ["1", "Synthetic"]];
+    // Only the load can be driven by hand; the PV is a curve or a synthetic day.
+    if (type === "Load") opts.push(["2", "Manual (typed in on the Live tab)"]);
+    opts.forEach(function (o) {
       var opt = document.createElement("option");
       opt.value = o[0]; opt.textContent = o[1];
       sel.appendChild(opt);
@@ -1782,7 +1869,7 @@
         return;
       }
       var input = kind === "number" ? numberInput(item.dev, key)
-                : kind === "mode"   ? modeInput(item.dev, key)
+                : kind === "mode"   ? modeInput(item.dev, key, item.type)
                                     : textInput(item.dev, key);
       fields.appendChild(field(label, required, input));
     });

@@ -142,7 +142,7 @@ their type is added to the file.
 | `PVModel` | `PV` | Follows a 24-hour irradiance curve from CSV, or a synthetic sin² arc 06:00–18:00 with ±5% noise. Output clamped to the written power limit. |
 | `BatteryModel` | `BESS` | Integrates a signed power command into SOC. On hitting the SOC ceiling or floor it back-calculates the energy actually absorbed, so the kWh counters stay honest. |
 | `EVModel` | `EV` | Draws rated power inside configured charging windows (midnight-wrapping supported), capped by the written setpoint, converted to balanced three-phase currents. |
-| `LoadModel` | `Load` | Replays a demand profile from CSV, interpolated linearly *between* its points at whatever instant it is asked for, or jitters 80–120% of base power. |
+| `LoadModel` | `Load` | Replays a demand profile from CSV, interpolated linearly *between* its points at whatever instant it is asked for; or jitters 80–120% of base power; or holds a figure the operator typed in. Which of the three is a control register, not a config field, so it changes mid-run. |
 | `JTCLoadModel` | `JTCLoad` | The JTC common load — landlord and common services. Its own algorithm, sharing no code with `LoadModel`: an operator-supplied CSV read through `DayCurve`, linearly interpolated at any resolution and wrapped across midnight. No synthetic mode and no base power — the curve or nothing. |
 | `T7PVModel` | `T7PV` | Tower 7's PV plant, outside the Tower 10 network. The same direct `DayCurve` readout as the JTC common load, plus an integrated kWh total. No irradiance model, no synthetic arc, no curtailment input. |
 | `MeterModel` | `Meter` | **Derived.** Sums the other devices into net power at the point of common coupling, then integrates it on a monotonic clock into separate import and export counters. |
@@ -260,9 +260,15 @@ times the per-phase current. Unresolved; no EV device is configured, so nothing 
 ### Building load — `LoadModel`
 
 ```
-mode 0 (CSV):        P = interpolate(curve, h)
-mode 1 (synthetic):  P = base_power · U(0.8, 1.2)
+Load.ModeSet = 0 (CSV):        P = interpolate(curve, h)
+Load.ModeSet = 1 (simulated):  P = base_power · U(0.8, 1.2)
+Load.ModeSet = 2 (manual):     P = max(0, Load.PowerSet)
 ```
+
+`Load.ModeSet` starts at the `mode` in `device.json` and `Load.PowerSet` at its `base_power`, so an
+unwritten register never means something the operator did not configure. A device that started on
+a synthetic or manual source has never read its CSV; switching to the curve loads it at that moment,
+and a missing or unusable file falls back to the synthetic day rather than to a silent zero.
 
 ### JTC common load — `JTCLoadModel`
 
@@ -606,7 +612,13 @@ sample without shifting the cadence of the ones after it.
 `test/test_dashboard_api.py` pins the point catalogue the diagram's detail panel is built on:
 that it covers every type in `config/modbus_registers.py`, lists each point once at its own offset
 in register order, carries the descriptions from that file rather than a copy, and marks exactly
-the three control registers writable.
+the five control registers writable — named one by one, so adding a sixth is a decision rather
+than a number that quietly moves.
+`test/test_load_modes.py` covers the load's three sources: that each one produces what it should,
+that switching to the curve loads a CSV the device never read at start-up, that a missing file
+falls back to the synthetic day rather than to a silent zero, that a stray mode is ignored, and
+that the register offsets `main.py` passes are the offsets the register map defines — nothing else
+would notice if those two drifted apart.
 `test/test_curve_upload.py` covers the one path where a file the models depend on arrives from
 outside the repository: that an upload lands in `config/` and nowhere else however it is named,
 that what the dashboard accepts is exactly what `DayCurve` then reads back, that an unusable or
@@ -667,7 +679,7 @@ of range or duplicated is replaced with the next free ID rather than shadowing a
 
 ### Control registers
 
-Three registers are **inputs**, read back by the simulation each tick. Writing one changes what
+Five registers are **inputs**, read back by the simulation each tick. Writing one changes what
 the next tick produces — this is what makes the simulator useful for testing a controller rather
 than replaying data.
 
@@ -676,13 +688,16 @@ than replaying data.
 | PV | 4 | `INV.LimitPower` | Curtails inverter output |
 | BESS | 14 | `BS.SysAPSetPoint` | Commands charge (+) or discharge (−) |
 | EV | 8 | `PUB_CONN.ChargePWSet` | Caps charging power |
+| Load | 2 | `Load.ModeSet` | Source: 0 curve, 1 simulated, 2 manual |
+| Load | 4 | `Load.PowerSet` | The manual figure, used when the source is 2 |
 
-Function code 16 will accept a write to any even offset, but only these three are consumed by the
-models. The rest are overwritten on the next tick.
+Function code 16 will accept a write to any even offset, but only these five are consumed by the
+models. The rest are overwritten on the next tick. An input is never republished by its model, so a
+write stands until the next one — the tick loop only writes back the points a model returns.
 
-With the shipped device set the first two are the only ones reachable: there is no EV device, so
-no unit answers for the charger. Curtailing the inverter and commanding the battery are the two
-levers a controller has against Tower 10.
+With the shipped device set four of the five are reachable: there is no EV device, so no unit
+answers for the charger. Curtailing the inverter, commanding the battery and driving the tenant
+load are the levers a controller has against Tower 10.
 
 ---
 
@@ -707,8 +722,14 @@ others, keeps its box on the site diagram, and keeps the full register list in t
 The virtual grid point is the one without a card now, because it is in the hero instead.
 
 Below the hero, a card per device with live power, state, accumulated energy, and battery SOC. The
-three control registers get a slider and a numeric field, so curtailing the inverter or commanding
-the battery takes a drag rather than a hand-built Modbus frame.
+control registers are driven from the cards, so no hand-built Modbus frame is needed: the inverter
+limit and the battery command get a slider and a numeric field, and **the load gets a source
+switch** — *CSV curve*, *Simulated*, *Manual* — with a **manual power** box that appears only under
+*Manual*, because under the other two the number would go nowhere. Both write through
+`POST /api/control` exactly as a Modbus write would, and take effect on the next tick; neither is
+written back to `device.json`, so a restart returns the load to its configured `mode`. While a
+click is in flight the card holds the operator's choice rather than flicking back to the register's
+old value.
 
 The **generating / consuming "right now" pair is gone** with the old hero. It summed the devices
 inside the Tower 10 loop, which was the boundary the old headline described; against a virtual
@@ -806,7 +827,7 @@ that reading itself, as the Tower 10 (T98) branch.
 **The detail panel** beside it follows the selection. Click a box — or tab to it and press Enter —
 and the panel names the device, its unit, which side of the boundary it is on, its headline value
 and state, what it is, the formula it is computed by, and then **every register it publishes**:
-name, description and live value, with `W` against the three that accept writes. The bus is
+name, description and live value, with `W` against the ones that accept writes. The bus is
 selectable too, and lists what is on it. For a device with a control, **Open controls** scrolls to
 its card below.
 
@@ -819,7 +840,10 @@ and a link can point at one.
 
 **Configuration** edits `config/device.json` in a form — start time, dashboard port, and every
 device's fields, including EV charging windows. Devices can be added and removed. Saving is
-validated before anything is written, and rejected saves leave the file untouched.
+validated before anything is written, and rejected saves leave the file untouched. A **Source**
+field offers *CSV curve* and *Synthetic* for a PV, and *Manual* as a third for a load — the
+validator holds the same line, so a `mode` of `2` on a PV is refused rather than written and
+silently ignored.
 
 **Curve fields take an upload.** Every `csv_file` field is a text box plus an **Upload CSV…**
 button. The text box still accepts anything the model does — a name in `config/`, or an absolute
@@ -878,7 +902,7 @@ curl -X POST http://localhost:8080/api/control \
   -d '{"device":"PV_01","point":"INV.LimitPower","value":30}'
 ```
 
-Writes are refused unless the point is one of the three control registers listed above —
+Writes are refused unless the point is one of the five control registers listed above —
 everything else is an output the next tick would overwrite, so accepting it would be misleading.
 
 ### How restart works
@@ -1016,6 +1040,8 @@ Offsets are relative to base address 0 for each unit. **W** marks a control inpu
 | Addr | Point | Meaning |
 |---|---|---|
 | 0 | `Load.Power` | Demand drawn |
+| 2 | `Load.ModeSet` | **Input.** Source: 0 curve, 1 simulated, 2 manual |
+| 4 | `Load.PowerSet` | **Input.** Manual demand (kW), read when the source is 2 |
 
 ### JTC common load — unit 9
 
@@ -1062,8 +1088,10 @@ each one is and why nothing else is there.
 }
 ```
 
-`mode` is `0` for a CSV curve and `1` for synthetic generation. `DeviceKey` must be unique — it
-is the key into `devices_data`.
+`mode` is `0` for a CSV curve and `1` for synthetic generation; a `Load` also takes `2`, holding
+`base_power` until the operator types a figure into its card. Whatever it is set to is where
+`Load.ModeSet` starts, and the Live tab can move it from there without touching this file.
+`DeviceKey` must be unique — it is the key into `devices_data`.
 
 A `JTCLoad` device takes the same fields as a `Load`. A `VirtualGrid` device takes the three
 static settings and, optionally, a `sources` list naming exactly which devices feed it:
@@ -1186,6 +1214,7 @@ test/
   test_history.py                the rolling power ring behind the trend chart
   test_isolation.py              the Tower 10 loop is unaffected by the virtual point
   test_t98_load.py               the Tower 10 curve band, load interpolation, T10 PV
+  test_load_modes.py             the load's three sources and the registers that switch them
   test_jtc_load.py               the JTC common load curve reader
   test_t7_pv.py                  the Tower 7 PV curve reader
   test_curve_upload.py           curve uploads: naming, parsing, replacement

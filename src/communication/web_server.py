@@ -41,7 +41,15 @@ WRITABLE = {
     'PV': {'INV.LimitPower': 4},
     'BESS': {'BS.SysAPSetPoint': 14},
     'EV': {'PUB_CONN.ChargePWSet': 8},
+    # The load is the one device an operator drives directly: a source switch
+    # and, when that says manual, the number it holds.
+    'Load': {'Load.ModeSet': 2, 'Load.PowerSet': 4},
 }
+
+# What a `mode` field may be, per type. Only the load has a manual source --
+# the PV's output is a curve or a synthetic day, never a typed-in number.
+MODE_VALUES = {'Load': (0, 1, 2)}
+MODE_NAMES = {0: 'curve', 1: 'simulated', 2: 'manual'}
 
 # Config values the UI needs to scale its sliders sensibly.
 LIMIT_KEYS = {
@@ -182,9 +190,11 @@ def validate_config(cfg):
                     elif kind in ('text', 'curve') and not isinstance(value, str):
                         errors.append('%s: %s must be text'
                                       % (key or dev_type, label))
-                    elif kind == 'mode' and value not in (0, 1):
-                        errors.append('%s: source must be 0 (curve) or 1 (synthetic)'
-                                      % (key or dev_type))
+                    elif kind == 'mode' and value not in MODE_VALUES.get(dev_type, (0, 1)):
+                        errors.append('%s: source must be one of %s'
+                                      % (key or dev_type,
+                                         ', '.join('%d (%s)' % (v, MODE_NAMES[v])
+                                                   for v in MODE_VALUES.get(dev_type, (0, 1)))))
                     elif kind == 'schedule':
                         if not isinstance(value, list):
                             errors.append('%s: charging windows must be a list'

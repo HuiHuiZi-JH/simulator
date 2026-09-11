@@ -171,6 +171,13 @@ def load_config():
                     initial_data[reg_offset] = 0.0
                     if dev_type == 'EV' and reg_name == 'PUB_CONN.ChargePWSet':
                         initial_data[reg_offset] = dev.get('PUB_CONN.RatedPW', 22.0)
+                    # The load's two control registers start where device.json
+                    # left them, so an unwritten register never means "curve"
+                    # for a device configured synthetic or manual.
+                    if dev_type == 'Load' and reg_name == 'Load.ModeSet':
+                        initial_data[reg_offset] = float(dev.get('mode', 0))
+                    if dev_type == 'Load' and reg_name == 'Load.PowerSet':
+                        initial_data[reg_offset] = float(dev.get('base_power', 0.0))
                 configured_slave_id = dev.get('slave_id')
                 if configured_slave_id is not None:
                     if not 1 <= configured_slave_id <= 247:
@@ -258,7 +265,11 @@ def update_device_data():
                             new_data = dev_info['model'].update(p_command=dev_info['data'].get(14, 0))
                         elif dev_info['type'] == 'EV':
                             new_data = dev_info['model'].update(devices_data, device_key)
-                        elif dev_info['type'] in ('Load', 'JTCLoad', 'T7PV'):
+                        elif dev_info['type'] == 'Load':
+                            new_data = dev_info['model'].update(
+                                mode=dev_info['data'].get(2),
+                                p_set=dev_info['data'].get(4))
+                        elif dev_info['type'] in ('JTCLoad', 'T7PV'):
                             new_data = dev_info['model'].update()
                         points = REGISTERS.get(dev_info['type'], {}).get('points', {})
                         for reg_name, reg_offset in points.items():

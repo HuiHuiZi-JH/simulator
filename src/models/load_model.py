@@ -6,6 +6,12 @@ import os
 
 logger = logging.getLogger('state')
 
+# The three sources a load can run from. 0 and 1 are what device.json has always
+# meant; 2 is the operator driving it by hand, from the dashboard panel or from
+# a Modbus write to Load.ModeSet.
+MODE_CURVE, MODE_SIM, MODE_MANUAL = 0, 1, 2
+
+
 class LoadModel:
     def __init__(self, config, start_hour):
         self.config = config
@@ -16,14 +22,15 @@ class LoadModel:
         self.power_curve = {}
         self.start_hour = start_hour
         self.start_time = time.time()
-        if self.mode == 0 and self.csv_file:
+        self.manual_power = float(config.get('base_power', 0.0))
+        if self.mode == MODE_CURVE and self.csv_file:
             self.load_power_curve()
         logger.info(f"LoadModel initialized for {config.get('DeviceKey')}: base_power = {self.base_power} kW, Mode = {self.mode}, Start hour = {self.start_hour}")
 
     def load_power_curve(self):
         if not os.path.exists(self.csv_file):
             logger.error(f"CSV file {self.csv_file} not found")
-            self.mode = 1
+            self.mode = MODE_SIM
             return
         self.power_curve = {}
         with open(self.csv_file, 'r') as f:
@@ -70,15 +77,49 @@ class LoadModel:
                 return interpolated
         return 0.0
 
-    def update(self):
+    def ensure_curve(self):
+        """Load the curve the first time the source is switched to it.
+
+        A device configured as synthetic or manual never read its CSV at start-up,
+        so switching to the curve at run time has to fetch it -- otherwise the
+        load would silently sit at zero. A missing or unusable file falls back to
+        the synthetic day rather than to nothing.
+        """
+        if self.power_curve or not self.csv_file:
+            return bool(self.power_curve)
         try:
+            self.load_power_curve()
+        except (OSError, ValueError) as e:
+            logger.error(f"LoadModel could not load {self.csv_file} on demand: {e}")
+        return bool(self.power_curve)
+
+    def update(self, mode=None, p_set=None):
+        """One tick. `mode` and `p_set` are the two control registers, so a write
+        from the dashboard or from Modbus takes effect on the next cycle without
+        a restart; with neither given the model runs on its configured source."""
+        try:
+            if mode is not None:
+                try:
+                    requested = int(round(float(mode)))
+                except (TypeError, ValueError):
+                    requested = self.mode
+                if requested in (MODE_CURVE, MODE_SIM, MODE_MANUAL):
+                    self.mode = requested
+            if p_set is not None:
+                try:
+                    self.manual_power = max(0.0, float(p_set))
+                except (TypeError, ValueError):
+                    pass
+
             elapsed_seconds = time.time() - self.start_time
             current_hour = self.start_hour + (elapsed_seconds / 3600)
             current_hour_display = current_hour % 24
 
-            logger.info(f"LoadModel update: Elapsed seconds = {elapsed_seconds:.1f}, Current hour = {current_hour_display:.2f}h")
+            logger.info(f"LoadModel update: Elapsed seconds = {elapsed_seconds:.1f}, Current hour = {current_hour_display:.2f}h, Mode = {self.mode}")
 
-            if self.mode == 0:
+            if self.mode == MODE_MANUAL:
+                self.power = self.manual_power
+            elif self.mode == MODE_CURVE and self.ensure_curve():
                 self.power = self.interpolate_power(current_hour_display)  # 使用 display hour
                 logger.debug(f"LoadModel update: interpolated_power={self.power}")
             else:
