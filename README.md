@@ -367,9 +367,11 @@ step = mag · (1 if raw/mag ≤ 1 else 2 if ≤ 2 else 5 if ≤ 5 else 10)
 
 ## Site model — the EGC control boundary
 
-`JTC_Archi_Diagram.png` is the architecture this simulator stands in for. The site is larger than
-the part the controller owns, so the EGC is shown a *synthetic* measurement rather than the real
-incoming meter:
+`JTC_Archi_Diagram.png` is the architecture this simulator stands in for — and the layout the
+dashboard's site diagram follows. Three details in that drawing are contradicted by the submission
+it was drawn from; they are listed under Web dashboard, and the submission wins. The site is larger
+than the part the controller owns, so the EGC is shown a *synthetic* measurement rather than the
+real incoming meter:
 
 ```
               Calculated "JTC common load"  =  the EGC's grid reference
@@ -751,24 +753,62 @@ fetches the handful of samples it is missing rather than the whole day. A restar
 sequence counter; the client notices the discontinuity and refetches in full.
 
 **The site diagram** sits between the virtual-grid headline and the device cards, and draws the
-shipped device set as one live single line: the JTC common load and the virtual grid point above
-the EGC control boundary, the Tower 10 loop below it — grid, meter, T98 LV bus, and the devices
-hung off that bus. Every box carries its own headline power, tinted the way the cards are: green
-generating, orange drawing, grey idle. Links animate in the direction power is actually flowing,
-from the sign of the value, and stand still when a device is at zero.
+shipped device set as one live single line — laid out the way `JTC_Archi_Diagram.png` lays out the
+site, so the dashboard and the architecture drawing read as the same picture:
+
+```
+                     ┌ ── Virtual grid incoming ── ┐   dashed: a calculation, not a meter
+                     │  = Incoming − Σ(T5+T6+T7+Podium+Basement+T10)
+  ══════════════════════════════╪══════════════════════════════  EGC control boundary
+        │                                          │
+  JTC common load                            Tower 10 (T98)
+  landlord / common services                 the whole feeder, at Meter_01
+                                        ═══════════╪═══════════  T98 LV bus
+                                          │        │        │
+                                       BESS 0.8 MW │     Tower 10 load
+                                               Solar PV
+  ┌──────────────────────────────────────────────────────────────────────────┐
+  │ EGC regulates this virtual site with 3 static settings: max import …      │
+  └──────────────────────────────────────────────────────────────────────────┘
+```
+
+Every box carries its own headline power, tinted the way the cards are: green generating, orange
+drawing, grey idle. Links animate in the direction power is actually flowing, from the sign of the
+value, and stand still when a device is at zero. The settings strip along the bottom is read from
+the registers `VGRID_01` publishes, not retyped, so it cannot disagree with what a controller sees.
 
 The diagram is drawn from the snapshot, not from a fixed picture of the shipped config: boxes are
 placed by band and type, so a second battery, a charger added back, or a Tower 7 PV device appears
-in its own slot without the file being edited. The one link that crosses the boundary is the
-battery's, because the battery is the one device on both sides of it — in the Tower 10 meter sum,
-and moving the virtual grid point.
+in its own slot without the file being edited. A band now says which loop a device is in rather
+than where it sits on the canvas — `t10` inside the Tower 10 loop, `egc` in the EGC control view
+above it, `outside` for a feeder that is pass-through to both, which is where a `T7PV` device is
+drawn. The one link that crosses the boundary is the battery's, because the battery is the one
+device on both sides of it — in the Tower 10 meter sum, and moving the virtual grid point; it is
+routed under the device row and up the margin so it crosses no box on the way.
+
+**Three things the drawing gets wrong are not reproduced**, because the submission itself
+contradicts them (`JTC_BESS_Control_Logic_Submission_v1.2.docx`, "Metering & JTC load calculation"
+and "Connection point"):
+
+| `JTC_Archi_Diagram.png` says | The submission says | The diagram draws |
+|---|---|---|
+| `= Incoming − Σ(T5 + T6 + T7 + Podium + Basement)` | `… + Tower 10` in the same sum | Tower 10 included |
+| Tower 10 is "part of JTC common load" | its feeder is subtracted out, like every other tenant's | Tower 10 outside the common load |
+| "Solar PV 200 kW" | 240 kW at Tower 7, **52 kW** at Tower 10 | the configured `ratedPower`, 52 kW |
+
+The PNG is a drawing of the site; the README and the models are what the simulator runs on. Where
+they disagree the submission wins, and the drawing is the thing that should be corrected.
+
+There is no utility-grid box any more. The architecture diagram has none — the virtual point is
+the top of its world — and the box only ever repeated `Meter_01`'s reading. The meter now carries
+that reading itself, as the Tower 10 (T98) branch.
 
 **The detail panel** beside it follows the selection. Click a box — or tab to it and press Enter —
 and the panel names the device, its unit, which side of the boundary it is on, its headline value
 and state, what it is, the formula it is computed by, and then **every register it publishes**:
-name, description and live value, with `W` against the three that accept writes. The bus and the
-grid are selectable too; the bus lists what is on it, the grid shows the meter's reading and its
-energy counters. For a device with a control, **Open controls** scrolls to its card below.
+name, description and live value, with `W` against the three that accept writes. The bus is
+selectable too, and lists what is on it. For a device with a control, **Open controls** scrolls to
+its card below.
 
 What the panel says about each device is what this README says: the descriptions come from
 `config/modbus_registers.py` through `GET /api/points`, and the notes restate the Site model

@@ -387,7 +387,19 @@
   #sld .link.derived { stroke-dasharray:3 5; }
   #sld .bus { stroke:var(--ink); stroke-width:5; stroke-linecap:round; }
   #sld .bus-hit { stroke:transparent; stroke-width:18; cursor:pointer; }
-  #sld .boundary { stroke:var(--faint); stroke-width:1.5; stroke-dasharray:7 6; }
+  /* The control boundary is the architecture diagram's heavy busbar, not a hint. */
+  #sld .boundary { stroke:var(--ink); stroke-width:6; stroke-linecap:round; }
+  #sld .nbox.virtual { stroke-dasharray:7 5; stroke:var(--ink); }
+  #sld .nformula {
+    font-family:"IBM Plex Mono",monospace; font-size:10px; fill:var(--muted);
+  }
+  #sld .stripbox {
+    fill:color-mix(in srgb,var(--warn) 12%,var(--surface));
+    stroke:color-mix(in srgb,var(--warn) 45%,transparent); stroke-width:1;
+  }
+  #sld .striptext {
+    font-family:"IBM Plex Mono",monospace; font-size:11px; fill:var(--warn);
+  }
   #sld .blabel {
     font-family:"IBM Plex Mono",monospace; font-size:11px; fill:var(--faint);
     letter-spacing:.06em;
@@ -960,8 +972,10 @@
   // description of it that could drift.
   var NODE_NOTE = {
     Meter: {
-      what: "The Tower 10 grid meter — the point of common coupling for the network the EGC " +
-            "controls. This is the meter the multi-loop runs its second control loop on.",
+      what: "The whole Tower 10 (T98) feeder, measured at its grid meter — the point of common " +
+            "coupling for the network the EGC controls, and the meter the multi-loop runs its " +
+            "second control loop on. Its own feeder is subtracted out of the JTC common load, " +
+            "so nothing here reaches the virtual point except through the battery.",
       formula: "ActivePower = Load + EV + BESS − PV"
     },
     VirtualGrid: {
@@ -1000,11 +1014,6 @@
             "sum alike — nothing in the simulator derives from it.",
       formula: "T7PV.GenActivePW = curve(sim_hour) — in neither measurement point"
     },
-    grid: {
-      what: "The utility supply. Everything below the boundary is measured against it by unit 1; " +
-            "positive at the meter means the site is importing.",
-      formula: null
-    },
     bus: {
       what: "The Tower 10 low-voltage bus. Everything sitting on it lands in the meter sum, and " +
             "nothing above the boundary does.",
@@ -1012,12 +1021,19 @@
     }
   };
 
-  var SLD_BOX = { w: 168, h: 72 }, SLD_GAP = 44;
+  // The layout follows JTC_Archi_Diagram.png: the calculated virtual point on
+  // top, the EGC control boundary as a busbar under it, the landlord's load and
+  // the Tower 10 feeder as its two branches, the T98 LV bus below Tower 10 with
+  // the devices hung off it, and the three static settings along the bottom.
+  var SLD_BOX = { w: 152, h: 84 }, SLD_GAP = 22;
   var SLD_GEO = {
-    aboveY: 38, linkY: 128, boundaryY: 152, busY: 300, busX1: 400,
-    grid: { x: 36, y: 264, w: 140, h: 72 },
-    meter: { x: 216, y: 264, w: 160, h: 72 },
-    topRowY: 186, bottomRowY: 352, rowX: 434, height: 470
+    pad: 22,
+    outsideY: 26, outsideW: 150, outsideH: 76,
+    vgY: 16, vgW: 328, vgH: 104,
+    boundaryY: 158,
+    branchY: 202, branchH: 88, jtcX: 56, jtcW: 232, t98W: 252,
+    busY: 336, busX1: 456, rowY: 372,
+    stripGap: 38, stripH: 48
   };
 
   var sldSel = null;     // selected node id, kept across redraws
@@ -1049,61 +1065,71 @@
   }
 
   var SHORT = {
-    Meter: "Tower 10 meter", PV: "Tower 10 PV", BESS: "Battery", Load: "Tower 10 load",
-    EV: "EV charger", JTCLoad: "JTC common load", VirtualGrid: "Virtual grid point",
-    T7PV: "Tower 7 PV", grid: "Utility grid", bus: "T98 LV bus"
+    Meter: "Tower 10 (T98)", PV: "Solar PV", BESS: "BESS 0.8 MW", Load: "Tower 10 load",
+    EV: "EV charger", JTCLoad: "JTC common load", VirtualGrid: "Virtual grid incoming",
+    T7PV: "Tower 7 PV", bus: "T98 LV bus"
   };
 
   // Boxes are placed by band and type order rather than pinned per device, so a
   // config with two batteries -- or none -- still draws instead of piling up.
+  // Bands say which loop a device is in, not where it sits on the canvas:
+  // "t10" inside the Tower 10 loop, "egc" in the EGC control view above it,
+  // "outside" for a feeder that is pass-through to both.
   function layoutDiagram(devices) {
     var byType = {};
     devices.forEach(function (d) { (byType[d.type] = byType[d.type] || []).push(d); });
 
-    var G = SLD_GEO, B = SLD_BOX, nodes = [], links = [], x;
+    var G = SLD_GEO, B = SLD_BOX, nodes = [], links = [];
 
-    function push(id, type, dev, x, y, w, h, band) {
-      var n = { id: id, type: type, dev: dev, x: x, y: y, w: w || B.w, h: h || B.h,
-                band: band, cx: x + (w || B.w) / 2, cy: y + (h || B.h) / 2 };
+    function push(id, type, dev, x, y, w, h, band, extra) {
+      var n = { id: id, type: type, dev: dev, x: x, y: y, w: w, h: h,
+                band: band, cx: x + w / 2, cy: y + h / 2 };
+      if (extra) for (var k in extra) if (extra.hasOwnProperty(k)) n[k] = extra[k];
       nodes.push(n);
       return n;
     }
 
-    // Above the boundary: the site as the EGC is shown it.
-    x = 36;
-    var vg = null, jtc = [];
-    ["JTCLoad", "VirtualGrid", "T7PV"].forEach(function (type) {
+    // On the T98 LV bus: everything the Tower 10 meter sums, hung below the bus
+    // the way the architecture diagram hangs the BESS and the rooftop PV.
+    var row = [], rx = G.busX1 + 14;
+    ["BESS", "PV", "Load", "EV"].forEach(function (type) {
       (byType[type] || []).forEach(function (d) {
-        var n = push(d.key, type, d, x, G.aboveY, B.w, B.h, "above");
-        if (type === "VirtualGrid" && !vg) vg = n;
-        if (type === "JTCLoad") jtc.push(n);
-        x += B.w + SLD_GAP;
+        row.push(push(d.key, type, d, rx, G.rowY, B.w, B.h, "t10"));
+        rx += B.w + SLD_GAP;
       });
     });
-    var aboveRight = x;
+    var busX2 = Math.max(rx - SLD_GAP + 14, G.busX1 + 240);
+    var width = Math.max(940, busX2 + 60);   // + margin for the battery's link
 
-    // Below it: the Tower 10 loop, hung off one bus.
-    push("grid", "grid", null, G.grid.x, G.grid.y, G.grid.w, G.grid.h, "below");
+    // The Tower 10 feeder, centred over its own bus.
     var meters = (byType["Meter"] || []).map(function (d, i) {
-      return push(d.key, "Meter", d, G.meter.x, G.meter.y + i * (G.meter.h + 14),
-                  G.meter.w, G.meter.h, "below");
+      return push(d.key, "Meter", d, (G.busX1 + busX2) / 2 - G.t98W / 2,
+                  G.branchY + i * (G.branchH + 12), G.t98W, G.branchH, "t10");
     });
 
-    function row(types, y) {
-      var rx = G.rowX, out = [];
-      types.forEach(function (type) {
-        (byType[type] || []).forEach(function (d) {
-          out.push(push(d.key, type, d, rx, y, B.w, B.h, "below"));
-          rx += B.w + SLD_GAP;
-        });
-      });
-      return { items: out, right: rx };
-    }
-    var top = row(["PV", "BESS"], G.topRowY);       // sources, above the bus
-    var bottom = row(["Load", "EV"], G.bottomRowY); // sinks, below it
+    // The other branch under the boundary: the landlord's own services.
+    var jtc = (byType["JTCLoad"] || []).map(function (d, i) {
+      return push(d.key, "JTCLoad", d, G.jtcX + i * (G.jtcW + SLD_GAP), G.branchY,
+                  G.jtcW, G.branchH, "egc");
+    });
 
-    var busX2 = Math.max(top.right, bottom.right, G.busX1 + 220) - SLD_GAP + 20;
-    var width = Math.max(860, busX2 + 24, aboveRight + 24);
+    // Above the boundary: the calculated point, dashed because no meter sits
+    // there. Its formula is the submission's, carried on the box itself.
+    var vg = null;
+    (byType["VirtualGrid"] || []).forEach(function (d, i) {
+      var n = push(d.key, "VirtualGrid", d, width / 2 - G.vgW / 2,
+                   G.vgY + i * (G.vgH + 10), G.vgW, G.vgH, "egc",
+                   { virtual: true,
+                     formula: "= Incoming \u2212 \u03a3(T5 + T6 + T7 + Podium + Basement + T10)" });
+      if (!vg) vg = n;
+    });
+
+    // Feeders the EGC is never shown: drawn clear of the control view.
+    var ox = G.pad;
+    (byType["T7PV"] || []).forEach(function (d) {
+      push(d.key, "T7PV", d, ox, G.outsideY, G.outsideW, G.outsideH, "outside");
+      ox += G.outsideW + SLD_GAP;
+    });
 
     // Links. Points run from -> to; a positive value flows that way, a negative
     // one flows back, which is what gives every arrow its direction.
@@ -1111,42 +1137,43 @@
       links.push({ pts: pts, value: value, cls: cls || "" });
     }
 
-    meters.forEach(function (m) {
-      link([[G.grid.x + G.grid.w, m.cy], [m.x, m.cy]],
-           function (by) { return primaryOf(by[m.id]); });
-      link([[m.x + m.w, m.cy], [G.busX1, m.cy], [G.busX1, G.busY]],
-           function (by) { return primaryOf(by[m.id]); });
+    if (vg) {
+      link([[vg.cx, vg.y + vg.h], [vg.cx, G.boundaryY]],
+           function (by) { return primaryOf(by[vg.id]); }, "derived");
+    }
+    jtc.forEach(function (n) {
+      link([[n.cx, G.boundaryY], [n.cx, n.y]], function (by) { return primaryOf(by[n.id]); });
     });
-
-    top.items.forEach(function (n) {
-      // Source side: drawn from the device down to the bus.
-      link([[n.cx, n.y + n.h], [n.cx, G.busY]], function (by) {
+    meters.forEach(function (m) {
+      link([[m.cx, G.boundaryY], [m.cx, m.y]], function (by) { return primaryOf(by[m.id]); });
+      link([[m.cx, m.y + m.h], [m.cx, G.busY]], function (by) { return primaryOf(by[m.id]); });
+    });
+    row.forEach(function (n) {
+      link([[n.cx, G.busY], [n.cx, n.y]], function (by) {
         var v = primaryOf(by[n.id]);
-        return n.type === "BESS" ? -v : v;   // charging flows bus -> battery
+        return n.type === "PV" ? -v : v;    // generation flows up into the bus
       });
       if (n.type === "BESS" && vg) {
-        // The one link that crosses the boundary: the battery moves the point.
-        link([[n.cx, n.y], [n.cx, SLD_GEO.linkY], [vg.cx, SLD_GEO.linkY], [vg.cx, vg.y + vg.h]],
+        // The one link that crosses the boundary, because the battery is the one
+        // device on both sides of it. Routed under the row and up the right
+        // margin rather than back through the bus, which carries power and not
+        // a calculation — and so it crosses no box on the way.
+        var mx = busX2 + 30, under = G.rowY + B.h + 18;
+        link([[n.cx, n.y + n.h], [n.cx, under], [mx, under], [mx, vg.cy],
+              [vg.x + vg.w, vg.cy]],
              function (by) { return -primaryOf(by[n.id]); }, "derived");
       }
     });
-    bottom.items.forEach(function (n) {
-      link([[n.cx, G.busY], [n.cx, n.y]], function (by) { return primaryOf(by[n.id]); });
-    });
-    if (vg) {
-      jtc.forEach(function (n) {
-        link([[n.x + n.w, n.cy], [vg.x, vg.cy]],
-             function (by) { return -primaryOf(by[n.id]); }, "derived");
-      });
-    }
 
-    return { nodes: nodes, links: links, width: width, busX2: busX2 };
+    var stripY = G.rowY + B.h + G.stripGap;
+    return { nodes: nodes, links: links, width: width, busX1: G.busX1, busX2: busX2,
+             stripY: stripY, height: stripY + G.stripH + G.pad };
   }
 
   function buildDiagram(devices) {
     var svg = $("sld"), plan = layoutDiagram(devices), G = SLD_GEO;
     svg.innerHTML = "";
-    svg.setAttribute("viewBox", "0 0 " + plan.width + " " + G.height);
+    svg.setAttribute("viewBox", "0 0 " + plan.width + " " + plan.height);
     sldNodes = {}; sldLinks = [];
 
     var defs = svgEl("defs");
@@ -1159,11 +1186,12 @@
     });
     svg.appendChild(defs);
 
-    // The boundary, and what each side of it means.
-    svg.appendChild(svgEl("line", { class: "boundary", x1: 20, y1: G.boundaryY,
-                                    x2: plan.width - 20, y2: G.boundaryY }));
-    var bl = svgEl("text", { class: "blabel", x: 22, y: G.boundaryY - 8 });
-    bl.textContent = "EGC control boundary — below it, the Tower 10 loop";
+    // The boundary, and what it hides — the submission's own wording.
+    svg.appendChild(svgEl("line", { class: "boundary", x1: G.pad, y1: G.boundaryY,
+                                    x2: plan.width - G.pad, y2: G.boundaryY }));
+    var bl = svgEl("text", { class: "blabel", x: G.pad, y: G.boundaryY - 12 });
+    bl.textContent = "EGC control boundary — towers 5/6/7, Podium and Basement are " +
+                     "pass-through, hidden from the control loop";
     svg.appendChild(bl);
 
     plan.links.forEach(function (l) {
@@ -1176,24 +1204,24 @@
     // The bus itself is selectable, so "what is on this bus" has somewhere to go.
     var bus = svgEl("g", { class: "node", tabindex: "0", role: "button",
                            "aria-label": "Tower 10 low voltage bus" });
-    bus.appendChild(svgEl("line", { class: "bus", x1: G.busX1, y1: G.busY,
+    bus.appendChild(svgEl("line", { class: "bus", x1: plan.busX1, y1: G.busY,
                                     x2: plan.busX2, y2: G.busY }));
-    bus.appendChild(svgEl("line", { class: "bus-hit", x1: G.busX1, y1: G.busY,
+    bus.appendChild(svgEl("line", { class: "bus-hit", x1: plan.busX1, y1: G.busY,
                                     x2: plan.busX2, y2: G.busY }));
-    var bt = svgEl("text", { class: "blabel", x: plan.busX2, y: G.busY + 20,
+    var bt = svgEl("text", { class: "blabel", x: plan.busX1 - 8, y: G.busY + 4,
                              "text-anchor": "end" });
     bt.textContent = "T98 LV bus";
     bus.appendChild(bt);
     svg.appendChild(bus);
     selectable(bus, "bus");
-    sldNodes["bus"] = { el: bus, node: { id: "bus", type: "bus", dev: null } };
+    sldNodes["bus"] = { el: bus, node: { id: "bus", type: "bus", dev: null, band: "t10" } };
 
     plan.nodes.forEach(function (n) {
       var g = svgEl("g", { class: "node", tabindex: "0", role: "button",
                            "aria-label": (SHORT[n.type] || n.type) +
                                          (n.dev ? ", " + n.dev.key : "") });
-      g.appendChild(svgEl("rect", { class: "nbox", x: n.x, y: n.y, width: n.w,
-                                    height: n.h, rx: 8 }));
+      g.appendChild(svgEl("rect", { class: "nbox" + (n.virtual ? " virtual" : ""),
+                                    x: n.x, y: n.y, width: n.w, height: n.h, rx: 8 }));
       var t = svgEl("text", { class: "ntitle", x: n.x + 12, y: n.y + 20 });
       t.textContent = SHORT[n.type] || n.type;
       g.appendChild(t);
@@ -1204,13 +1232,37 @@
       u.textContent = "kW";
       g.appendChild(u);
       var sub = svgEl("text", { class: "nsub", x: n.x + 12, y: n.y + 62 });
-      sub.textContent = n.dev ? n.dev.key + " · unit " + n.dev.slave_id
-                              : (n.type === "grid" ? "as measured by unit 1" : "");
+      sub.textContent = n.dev ? n.dev.key + " · unit " + n.dev.slave_id : "";
       g.appendChild(sub);
+      if (n.formula) {
+        var f = svgEl("text", { class: "nformula", x: n.x + 12, y: n.y + 84 });
+        f.textContent = n.formula;
+        g.appendChild(f);
+      }
       svg.appendChild(g);
       selectable(g, n.id);
       sldNodes[n.id] = { el: g, node: n, val: v, unit: u };
     });
+
+    // The settings strip the architecture diagram closes on, read from the
+    // registers the virtual grid device publishes rather than retyped here.
+    var vgd = devices.filter(function (d) { return d.type === "VirtualGrid"; })[0];
+    if (vgd) {
+      var kw = function (name) {
+        var x = vgd.points[name];
+        return (x === undefined || x === null) ? "—" : Math.round(x).toLocaleString() + " kW";
+      };
+      var strip = svgEl("g", {});
+      strip.appendChild(svgEl("rect", { class: "stripbox", x: G.pad, y: plan.stripY,
+                                        width: plan.width - G.pad * 2, height: G.stripH, rx: 8 }));
+      var st = svgEl("text", { class: "striptext", x: plan.width / 2,
+                               y: plan.stripY + G.stripH / 2 + 4, "text-anchor": "middle" });
+      st.textContent = "EGC regulates this virtual site with 3 static settings:  " +
+                       "max import " + kw("VG.MaxImport") + "  ·  BESS zero export ≥ " +
+                       kw("VG.BessZeroExport") + "  ·  T98 loop limit " + kw("VG.T98LoopLimit");
+      strip.appendChild(st);
+      svg.appendChild(strip);
+    }
   }
 
   function selectable(el, id) {
@@ -1242,18 +1294,16 @@
 
     var by = {};
     state.devices.forEach(function (d) { by[d.key] = d; });
-    var meterDev = state.devices.filter(function (d) { return d.type === "Meter"; })[0];
 
     Object.keys(sldNodes).forEach(function (id) {
       var entry = sldNodes[id], n = entry.node;
       if (!entry.val) return;                       // the bus carries no value
-      var dev = n.dev ? by[n.id] : null;
-      var v = n.type === "grid" ? primaryOf(meterDev) : primaryOf(dev);
+      var v = primaryOf(by[n.id]);
       entry.val.textContent = fmt(v);
       // The unit sits just after the number, whose width changes with the value.
       entry.unit.setAttribute("x", n.x + 12 + entry.val.getComputedTextLength() + 6);
-      var cls = n.type === "grid" ? "" : " " + roleClass(n.type, v);
-      entry.el.setAttribute("class", "node" + cls + (id === sldSel ? " sel" : ""));
+      entry.el.setAttribute("class", "node " + roleClass(n.type, v) +
+                                     (id === sldSel ? " sel" : ""));
     });
 
     sldLinks.forEach(function (l) {
@@ -1282,14 +1332,15 @@
     var host = $("detail"), entry = sldNodes[sldSel];
     if (!entry) { host.innerHTML = '<p class="detail-empty">Nothing selected.</p>'; return; }
     var n = entry.node, dev = n.dev, note = NODE_NOTE[n.type] || {};
-    var side = n.band === "above" ? "outside the Tower 10 loop" : "inside the Tower 10 loop";
+    var side = n.band === "t10" ? "inside the Tower 10 loop"
+             : n.band === "egc" ? "in the EGC control view, outside the Tower 10 loop"
+                                : "pass-through — in neither loop";
 
     var html = '<div class="detail-head"><h3>' + (SHORT[n.type] || n.type) + '</h3>';
     if (dev) html += '<span class="typetag">' + n.type + '</span>';
     html += '</div><p class="detail-sub">' +
             (dev ? dev.key + " · unit " + dev.slave_id + " · " + side
-                 : (n.type === "bus" ? "static · inside the Tower 10 loop"
-                                     : "static · the supply side")) +
+                 : "static · inside the Tower 10 loop") +
             '</p>';
 
     if (n.type !== "bus") {
@@ -1309,18 +1360,10 @@
                 '</span><span class="pval" data-p="' + pt.name + '" data-u="' + u[0] +
                 '" data-dp="' + u[1] + '">—</span></div>';
       });
-    } else if (n.type === "grid") {
-      html += '<div class="prow"><span class="pname">Meter reading' +
-              '<span class="pdesc">positive is import from the grid</span></span>' +
-              '<span class="pval" data-m="ActivePower" data-u="kW" data-dp="2">—</span></div>' +
-              '<div class="prow"><span class="pname">Imported today</span>' +
-              '<span class="pval" data-m="APConsumedKWH" data-u="kWh" data-dp="3">—</span></div>' +
-              '<div class="prow"><span class="pname">Exported today</span>' +
-              '<span class="pval" data-m="APProductionKWH" data-u="kWh" data-dp="3">—</span></div>';
     } else if (n.type === "bus") {
       Object.keys(sldNodes).forEach(function (id) {
         var other = sldNodes[id].node;
-        if (!other.dev || other.band === "above" || other.type === "Meter") return;
+        if (!other.dev || other.band !== "t10" || other.type === "Meter") return;
         html += '<div class="prow"><span class="pname">' + other.dev.key +
                 '<span class="pdesc">' + (SHORT[other.type] || other.type) + '</span></span>' +
                 '<span class="pval" data-dev="' + other.dev.key + '">—</span></div>';
@@ -1349,18 +1392,17 @@
     var n = entry.node, by = {};
     state.devices.forEach(function (d) { by[d.key] = d; });
     var dev = n.dev ? by[n.id] : null;
-    var meterDev = state.devices.filter(function (d) { return d.type === "Meter"; })[0];
 
     var big = host.querySelector('[data-d="big"]');
     if (big) {
-      var v = n.type === "grid" ? primaryOf(meterDev) : primaryOf(dev);
+      var v = primaryOf(dev);
       big.textContent = fmt(v, 2);
       var pill = host.querySelector('[data-d="pill"]');
-      var role = roleClass(n.type === "grid" ? "Meter" : n.type, v);
+      var role = roleClass(n.type, v);
       pill.className = "statepill " + (role === "is-idle" ? "off" : role === "is-gen" ? "on" : "draw");
       pill.textContent = role === "is-idle" ? "idle"
                        : n.type === "BESS" ? (v < 0 ? "discharging" : "charging")
-                       : (n.type === "Meter" || n.type === "grid" || n.type === "VirtualGrid")
+                       : (n.type === "Meter" || n.type === "VirtualGrid")
                          ? (v < 0 ? "exporting" : "importing")
                        : role === "is-gen" ? "generating" : "drawing";
     }
@@ -1370,11 +1412,6 @@
       var name = cell.getAttribute("data-p");
       cell.textContent = fmt(dev.points[name], +cell.getAttribute("data-dp")) +
                          " " + cell.getAttribute("data-u");
-    });
-    host.querySelectorAll("[data-m]").forEach(function (cell) {
-      if (!meterDev) return;
-      cell.textContent = fmt(meterDev.points[cell.getAttribute("data-m")],
-                             +cell.getAttribute("data-dp")) + " " + cell.getAttribute("data-u");
     });
     host.querySelectorAll("[data-dev]").forEach(function (cell) {
       var other = by[cell.getAttribute("data-dev")];
