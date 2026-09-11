@@ -15,7 +15,7 @@ from src.models.battery_model import BatteryModel
 from src.models.ev_model import EVModel
 from src.models.meter_model import MeterModel
 from src.models.load_model import LoadModel, DEFAULT_BASE_POWER
-from src.models.jtc_load_model import JTCLoadModel
+from src.models.jtc_load_model import JTCLoadModel, MODE_CURVE as JTC_MODE_CURVE
 from src.models.t7_pv_model import T7PVModel
 from src.models.virtual_grid_model import VirtualGridModel
 from src.history import PowerHistory
@@ -179,6 +179,13 @@ def load_config():
                     if dev_type == 'Load' and reg_name == 'Load.PowerSet':
                         initial_data[reg_offset] = float(dev.get('base_power',
                                                                 DEFAULT_BASE_POWER))
+                    # The JTC common load has the same pair. Its manual figure
+                    # has no configured constant to fall back on, so the model
+                    # reads it off the operator's own curve and main.py copies
+                    # it back into the register once the model exists.
+                    if dev_type == 'JTCLoad' and reg_name == 'JTC.ModeSet':
+                        initial_data[reg_offset] = float(dev.get('mode',
+                                                                 JTC_MODE_CURVE))
                 configured_slave_id = dev.get('slave_id')
                 if configured_slave_id is not None:
                     if not 1 <= configured_slave_id <= 247:
@@ -228,7 +235,15 @@ def load_config():
                     elif dev_type == 'Load':
                         devices_data[device_key]['model'] = LoadModel(dev, START_HOUR)
                     elif dev_type == 'JTCLoad':
-                        devices_data[device_key]['model'] = JTCLoadModel(dev, START_HOUR)
+                        model = JTCLoadModel(dev, START_HOUR)
+                        devices_data[device_key]['model'] = model
+                        # Manual opens at the curve's own value for this hour,
+                        # which only the model can work out. Copy it into the
+                        # register so the dashboard and a Modbus read both show
+                        # what a switch to manual would hold.
+                        set_offset = REGISTERS['JTCLoad']['points'].get('JTC.PowerSet')
+                        if set_offset is not None:
+                            initial_data[set_offset] = model.manual_power
                     elif dev_type == 'T7PV':
                         devices_data[device_key]['model'] = T7PVModel(dev, START_HOUR)
                     elif dev_type == 'VirtualGrid':
@@ -270,7 +285,11 @@ def update_device_data():
                             new_data = dev_info['model'].update(
                                 mode=dev_info['data'].get(2),
                                 p_set=dev_info['data'].get(4))
-                        elif dev_info['type'] in ('JTCLoad', 'T7PV'):
+                        elif dev_info['type'] == 'JTCLoad':
+                            new_data = dev_info['model'].update(
+                                mode=dev_info['data'].get(2),
+                                p_set=dev_info['data'].get(4))
+                        elif dev_info['type'] == 'T7PV':
                             new_data = dev_info['model'].update()
                         points = REGISTERS.get(dev_info['type'], {}).get('points', {})
                         for reg_name, reg_offset in points.items():
@@ -326,7 +345,9 @@ def update_device_data():
                     elif dev_info['type'] == 'Load':
                         log_messages.append(f"Load {device_key} Power: {dev_info['data'].get(0, 0):.2f} kW")
                     elif dev_info['type'] == 'JTCLoad':
-                        log_messages.append(f"JTC common load {device_key} Power: {dev_info['data'].get(0, 0):.2f} kW")
+                        jtc_mode = int(round(dev_info['data'].get(2, 0)))
+                        log_messages.append(f"JTC common load {device_key} Power: {dev_info['data'].get(0, 0):.2f} kW "
+                                  f"({'manual' if jtc_mode == 2 else 'curve'})")
                     elif dev_info['type'] == 'T7PV':
                         log_messages.append(f"T7 PV {device_key} GenActivePW: {dev_info['data'].get(0, 0):.2f} kW")
                     elif dev_info['type'] == 'VirtualGrid':

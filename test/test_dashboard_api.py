@@ -44,7 +44,7 @@ class PointCatalogue(unittest.TestCase):
                 self.assertEqual(entry['description'], described.get(entry['name'], ''))
 
     def test_control_registers_are_marked_writable(self):
-        # The same five the web and Modbus interfaces accept writes on, and
+        # The same seven the web and Modbus interfaces accept writes on, and
         # nothing else: an output marked writable would invite a write the next
         # tick silently overwrites.
         marked = set()
@@ -63,6 +63,8 @@ class PointCatalogue(unittest.TestCase):
             ('EV', 'PUB_CONN.ChargePWSet'),
             ('Load', 'Load.ModeSet'),
             ('Load', 'Load.PowerSet'),
+            ('JTCLoad', 'JTC.ModeSet'),
+            ('JTCLoad', 'JTC.PowerSet'),
         })
 
 

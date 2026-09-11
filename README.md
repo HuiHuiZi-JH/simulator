@@ -250,7 +250,7 @@ their type is added to the file.
 | `BatteryModel` | `BESS` | Integrates a signed power command into SOC. On hitting the SOC ceiling or floor it back-calculates the energy actually absorbed, so the kWh counters stay honest. |
 | `EVModel` | `EV` | Draws rated power inside configured charging windows (midnight-wrapping supported), capped by the written setpoint, converted to balanced three-phase currents. |
 | `LoadModel` | `Load` | Replays a demand profile from CSV, interpolated linearly *between* its points at whatever instant it is asked for; or jitters 80–120% of base power; or holds a figure the operator typed in. Which of the three is a control register, not a config field, so it changes mid-run. |
-| `JTCLoadModel` | `JTCLoad` | The JTC common load — landlord and common services. Its own algorithm, sharing no code with `LoadModel`: an operator-supplied CSV read through `DayCurve`, linearly interpolated at any resolution and wrapped across midnight. No synthetic mode and no base power — the curve or nothing. |
+| `JTCLoadModel` | `JTCLoad` | The JTC common load — landlord and common services. Its own algorithm, sharing no code with `LoadModel`: an operator-supplied CSV read through `DayCurve`, linearly interpolated at any resolution and wrapped across midnight, or a figure the operator types in. No synthetic mode and no base power — both sources are the operator's own. |
 | `T7PVModel` | `T7PV` | Tower 7's PV plant, outside the Tower 10 network. The same direct `DayCurve` readout as the JTC common load, plus an integrated kWh total. No irradiance model, no synthetic arc, no curtailment input. |
 | `MeterModel` | `Meter` | **Derived.** Sums the other devices into net power at the point of common coupling, then integrates it on a monotonic clock into separate import and export counters — by trapezoid, split at a zero crossing, through the shared `split_energy`. |
 | `VirtualGridModel` | `VirtualGrid` | **Derived.** Sums the JTC common load and the battery into the virtual grid incoming figure the EGC regulates against, with its own import and export counters and the three static settings. |
@@ -391,11 +391,30 @@ and a missing or unusable file falls back to the synthetic day rather than to a 
 ### JTC common load — `JTCLoadModel`
 
 ```
-JTC.Power = DayCurve.at(h)
+JTC.ModeSet = 0 (CSV):     JTC.Power = DayCurve.at(h)
+JTC.ModeSet = 2 (manual):  JTC.Power = max(0, JTC.PowerSet)
 ```
 
-That is the whole model. No synthetic mode, no base power, no fallback — a missing or unreadable
-file raises at startup instead of inventing a curve.
+Two sources, numbered as the building load numbers its own, so **2 means manual at every device
+that has one**. There is deliberately no 1: the synthetic day is a *simulator-invented* figure, and
+this load never carries one. A write of 1 is refused rather than rounded to something else — the
+web API answers with what the point takes, and a Modbus write of 1 is both ignored *and corrected
+in the register* on the next tick. That correction is the one place a model republishes an input,
+and it exists because 1 is a real source on the neighbouring device: an EMS that wrote it here
+would otherwise read the register back as 1 and believe this load was running on a synthetic day.
+
+`JTC.ModeSet` starts at the `mode` in `device.json`, and `JTC.PowerSet` starts at **the curve's own
+value for the start hour** unless `manual_power` says otherwise. That is the difference from the
+building load, which opens manual at its configured `base_power`: this device has no base power to
+fall back on, and the alternative — opening at zero — would move the virtual grid point the moment
+an operator switched source. The opening figure therefore still comes from the operator's file,
+never from a constant in the repository.
+
+`csv_file` stays **required in both modes**. Manual is an override of the curve, not a replacement
+for it, so switching back always has a file to switch back to; the building load's
+load-it-on-demand path, and its fallback to a synthetic day when the file is unusable, have no
+counterpart here. A missing or unreadable file still raises at startup instead of inventing a
+curve.
 
 ### Tower 7 PV — `T7PVModel`
 
@@ -661,12 +680,21 @@ changing any model.
 `JTC_COMMON_01` is a device in `device.json` like any other, but it is **not** the building load
 model under a different name. `JTCLoadModel` imports nothing from `LoadModel` and implements its
 own curve algorithm, because the two answer different questions: the building load may fall back
-to a synthetic 80–120% jitter when it has no file, whereas the JTC common load is *only* ever the
-profile the operator supplies.
+to a synthetic 80–120% jitter when it has no file, whereas the JTC common load is *only* ever what
+the operator gave it.
 
 That difference is deliberate. A fabricated common load would put the virtual grid point at a
 wrong value without looking wrong, so there is no fallback at all: `csv_file` is required, and a
 missing, empty or unreadable file raises at startup instead of inventing a curve.
+
+**Two sources, both the operator's.** The load runs from its CSV, or from a figure typed into the
+manual box on its card — switchable live, exactly as the building load's source switch works, and
+over Modbus through `JTC.ModeSet` and `JTC.PowerSet` (unit 9, registers 2 and 4). The manual
+source does not weaken the rule above, and it is worth being exact about why: the rule forbids the
+*simulator* choosing a value, not the *operator* stating one. A typed 900 kW is a commissioning
+engineer holding the common load at a stated figure to see what the EGC does about it — the most
+useful thing this simulator does. A synthetic day would be the simulator inventing the number
+instead, which is why there is still no mode 1 here.
 
 The reader is also more forgiving than the older ones, since this file comes from the operator
 rather than the repository:
@@ -684,6 +712,21 @@ Configure it with nothing but its curve:
     "DeviceKey": "JTC_COMMON_01",
     "csv_file":  "jtc_common_curve.csv",
     "slave_id":  9
+} ] }
+```
+
+Two optional fields go with the manual source: `"mode": 2` starts the device on it, and
+`"manual_power"` sets the figure it opens at. With neither, the device starts on its curve and the
+manual box opens at the curve's value for the start hour, so switching source holds what the site
+was already drawing instead of jumping to zero.
+
+```json
+{ "JTCLoad": [ {
+    "DeviceKey":    "JTC_COMMON_01",
+    "csv_file":     "jtc_common_curve.csv",
+    "mode":         2,
+    "manual_power": 900,
+    "slave_id":     9
 } ] }
 ```
 
@@ -845,8 +888,10 @@ than replaying data.
 | EV | 8 | `PUB_CONN.ChargePWSet` | Caps charging power |
 | Load | 2 | `Load.ModeSet` | Source: 0 curve, 1 simulated, 2 manual |
 | Load | 4 | `Load.PowerSet` | The manual figure, used when the source is 2 |
+| JTCLoad | 2 | `JTC.ModeSet` | Source: 0 curve, 2 manual — 1 is refused |
+| JTCLoad | 4 | `JTC.PowerSet` | The manual figure, used when the source is 2 |
 
-Function code 16 will accept a write to any even offset, but only these five are consumed by the
+Function code 16 will accept a write to any even offset, but only these seven are consumed by the
 models. The rest are overwritten on the next tick. An input is never republished by its model, so a
 write stands until the next one — the tick loop only writes back the points a model returns.
 
@@ -878,11 +923,13 @@ The virtual grid point is the one without a card now, because it is in the hero 
 
 Below the hero, a card per device with live power, state, accumulated energy, and battery SOC. The
 control registers are driven from the cards, so no hand-built Modbus frame is needed: the inverter
-limit and the battery command get a slider and a numeric field, and **the load gets a source
-switch** — *CSV curve*, *Simulated*, *Manual* — with a **manual power** box that appears only under
-*Manual*, because under the other two the number would go nowhere. Both write through
-`POST /api/control` exactly as a Modbus write would, and take effect on the next tick; neither is
-written back to `device.json`, so a restart returns the load to its configured `mode`. While a
+limit and the battery command get a slider and a numeric field, and **each load gets a source
+switch** with a **manual power** box that appears only under *Manual*, because under the other
+sources the number would go nowhere. The building load offers three — *CSV curve*, *Simulated*,
+*Manual* — and the JTC common load two, *CSV curve* and *Manual*, since it has no synthetic day.
+All of them write through `POST /api/control` exactly as a Modbus write would, and take effect on
+the next tick; none is written back to `device.json`, so a restart returns each load to its
+configured `mode`. While a
 click is in flight the card holds the operator's choice rather than flicking back to the register's
 old value.
 
@@ -996,9 +1043,10 @@ and a link can point at one.
 **Configuration** edits `config/device.json` in a form — start time, dashboard port, and every
 device's fields, including EV charging windows. Devices can be added and removed. Saving is
 validated before anything is written, and rejected saves leave the file untouched. A **Source**
-field offers *CSV curve* and *Synthetic* for a PV, and *Manual* as a third for a load — the
-validator holds the same line, so a `mode` of `2` on a PV is refused rather than written and
-silently ignored.
+field offers *CSV curve* and *Synthetic* for a PV, *Manual* as a third for the building load, and
+*CSV curve* or *Manual* for the JTC common load — the validator holds the same line, so a `mode` of
+`2` on a PV, or of `1` on the JTC common load, is refused rather than written and silently
+ignored.
 
 **Curve fields take an upload.** Every `csv_file` field is a text box plus an **Upload CSV…**
 button. The text box still accepts anything the model does — a name in `config/`, or an absolute
@@ -1203,6 +1251,8 @@ Offsets are relative to base address 0 for each unit. **W** marks a control inpu
 | Addr | Point | Meaning |
 |---|---|---|
 | 0 | `JTC.Power` | Landlord / common-services demand |
+| 2 | `JTC.ModeSet` | **Input.** Source: 0 curve, 2 manual. 1 is refused — this load has no synthetic day |
+| 4 | `JTC.PowerSet` | **Input.** Manual demand (kW), read when the source is 2 |
 
 ### Virtual grid incoming — unit 6
 
@@ -1248,7 +1298,9 @@ each one is and why nothing else is there.
 `Load.ModeSet` starts, and the Live tab can move it from there without touching this file.
 `DeviceKey` must be unique — it is the key into `devices_data`.
 
-A `JTCLoad` device takes the same fields as a `Load`. A `VirtualGrid` device takes the three
+A `JTCLoad` device takes `0` and `2` but not `1`, and `manual_power` in place of `base_power`;
+see **The JTC common load** for why the synthetic day is missing and what the manual figure opens
+at when that field is absent. A `VirtualGrid` device takes the three
 static settings and, optionally, a `sources` list naming exactly which devices feed it:
 
 ```json

@@ -49,14 +49,17 @@ WRITABLE = {
     'PV': {'INV.LimitPower': 4},
     'BESS': {'BS.SysAPSetPoint': 14},
     'EV': {'PUB_CONN.ChargePWSet': 8},
-    # The load is the one device an operator drives directly: a source switch
-    # and, when that says manual, the number it holds.
+    # The two loads are what an operator drives directly: a source switch and,
+    # when that says manual, the number it holds.
     'Load': {'Load.ModeSet': 2, 'Load.PowerSet': 4},
+    'JTCLoad': {'JTC.ModeSet': 2, 'JTC.PowerSet': 4},
 }
 
-# What a `mode` field may be, per type. Only the load has a manual source --
-# the PV's output is a curve or a synthetic day, never a typed-in number.
-MODE_VALUES = {'Load': (0, 1, 2)}
+# What a `mode` field may be, per type. Only the loads have a manual source --
+# the PV's output is a curve or a synthetic day, never a typed-in number. The
+# JTC common load has no synthetic day either, so 1 is not among its values and
+# a write of 1 is refused rather than silently rounded to a source it lacks.
+MODE_VALUES = {'Load': (0, 1, 2), 'JTCLoad': (0, 2)}
 MODE_NAMES = {0: 'curve', 1: 'simulated', 2: 'manual'}
 
 # Config values the UI needs to scale its sliders sensibly.
@@ -65,6 +68,7 @@ LIMIT_KEYS = {
     'BESS': ('maxChargePower', 'maxDischargePower', 'ratedCapacity'),
     'EV': ('PUB_CONN.RatedPW', 'PUB_CONN.MinChargePW'),
     'Load': ('base_power',),
+    'JTCLoad': ('manual_power',),
     'VirtualGrid': ('max_import', 'bess_zero_export', 't98_loop_limit'),
 }
 
@@ -103,10 +107,14 @@ CONFIG_FIELDS = {
         ('mode', 'Source', 'mode', False),
         ('csv_file', 'Curve file', 'curve', False),
     ],
-    # No base power and no synthetic mode: the JTC common load is the curve
-    # the operator supplies, or nothing at all.
+    # No base power and no synthetic mode: the JTC common load is the curve the
+    # operator supplies, or a figure the operator types in. The curve stays
+    # required either way -- manual is an override of it, not a replacement, so
+    # switching back always has a file to switch back to.
     'JTCLoad': [
         ('csv_file', 'Curve file', 'curve', True),
+        ('mode', 'Source', 'mode', False),
+        ('manual_power', 'Manual power (kW)', 'number', False),
     ],
     'T7PV': [
         ('csv_file', 'Curve file', 'curve', True),
@@ -385,6 +393,17 @@ class WebServer:
             value = float(value)
         except (TypeError, ValueError):
             return False, 'Value must be a number'
+        # A source switch has a fixed set of values, and they differ by device:
+        # the JTC common load has no synthetic day. The model would ignore a
+        # value it does not have, leaving the register showing a source the
+        # device is not running on, so refuse it here where there is someone to
+        # tell. A Modbus client gets the model's silence, as it always has.
+        if point.endswith('.ModeSet'):
+            allowed = MODE_VALUES.get(dev['type'], ())
+            if allowed and int(round(value)) not in allowed:
+                return False, '%s takes %s on %s' % (
+                    point, ' or '.join('%d (%s)' % (v, MODE_NAMES.get(v, '?'))
+                                       for v in allowed), device_key)
         value = max(-21474836.48, min(21474836.48, value))
         with self.data_lock:
             dev['data'][offset] = value

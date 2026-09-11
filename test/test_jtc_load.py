@@ -1,5 +1,11 @@
 # -*- coding: utf-8 -*-
-"""The JTC common load is whatever curve the operator supplies -- and only that.
+"""The JTC common load runs on what the operator gives it -- a curve, or a figure.
+
+Neither source is ever the simulator's own invention, which is the rule these
+tests exist to hold: the curve is required and unforgiving, and the manual
+source holds a number somebody typed. The synthetic day the building load falls
+back to has no counterpart here, so a write of 1 to JTC.ModeSet is refused
+rather than landing on a source this device does not have.
 
 Run from the repository root:  python3 -m unittest discover -s test -t .
 """
@@ -10,7 +16,9 @@ import unittest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from src.models.jtc_load_model import JTCLoadModel
+from src.communication import web_server
+from config.modbus_registers import REGISTERS
+from src.models.jtc_load_model import JTCLoadModel, MODE_CURVE, MODE_MANUAL
 
 
 def curve_file(text):
@@ -125,6 +133,130 @@ class ShippedCurve(unittest.TestCase):
 
         # Nothing anywhere in the day is negative or absurd.
         self.assertTrue(all(0.0 <= v <= 2500.0 for v in samples))
+
+
+class Sources(unittest.TestCase):
+    """The two sources and the two registers that switch between them."""
+
+    def setUp(self):
+        self.paths = []
+
+    def tearDown(self):
+        for path in self.paths:
+            os.unlink(path)
+
+    def model(self, text="hour,kW\n0.0,100\n12.0,400\n24.0,100\n",
+              start_hour=12.0, **config):
+        path = curve_file(text)
+        self.paths.append(path)
+        cfg = {'DeviceKey': 'JTC_TEST', 'csv_file': path}
+        cfg.update(config)
+        return JTCLoadModel(cfg, start_hour)
+
+    def test_curve_is_the_default_source(self):
+        m = self.model()
+        self.assertEqual(m.mode, MODE_CURVE)
+        self.assertAlmostEqual(m.update()['JTC.Power'], 400.0, places=1)
+
+    def test_manual_holds_the_number_it_was_given(self):
+        m = self.model()
+        m.update(mode=MODE_MANUAL, p_set=640.0)
+        self.assertEqual(m.update(mode=MODE_MANUAL)['JTC.Power'], 640.0)
+
+    def test_manual_opens_at_the_curve_not_at_zero(self):
+        # Nothing has been typed yet, so the figure comes from the operator's
+        # own file at the start hour -- 400 kW at noon on this curve. A common
+        # load that opened at zero would move the virtual grid point the moment
+        # someone switched source.
+        m = self.model(start_hour=12.0)
+        self.assertAlmostEqual(m.manual_power, 400.0, places=6)
+        self.assertAlmostEqual(m.update(mode=MODE_MANUAL)['JTC.Power'], 400.0, places=6)
+
+    def test_a_configured_manual_power_wins(self):
+        m = self.model(manual_power=900.0)
+        self.assertEqual(m.update(mode=MODE_MANUAL)['JTC.Power'], 900.0)
+
+    def test_manual_refuses_a_negative(self):
+        m = self.model()
+        m.update(mode=MODE_MANUAL, p_set=-50.0)
+        self.assertEqual(m.power, 0.0)
+
+    def test_the_synthetic_mode_is_refused(self):
+        # 1 is the building load's synthetic day. This device has no such
+        # source, so the write leaves it where it was rather than quietly
+        # running on something nobody configured.
+        m = self.model()
+        m.update(mode=1)
+        self.assertEqual(m.mode, MODE_CURVE)
+        self.assertAlmostEqual(m.update(mode=1)['JTC.Power'], 400.0, places=1)
+
+    def test_a_refused_source_is_corrected_in_the_register(self):
+        # The model normally never republishes an input, so a write stands until
+        # the next one. A refused write is the exception: an EMS that wrote 1 --
+        # a real source on the building load -- would otherwise read the
+        # register back as 1 and believe this load was running on it.
+        m = self.model()
+        out = m.update(mode=1)
+        self.assertEqual(out['JTC.ModeSet'], float(MODE_CURVE))
+        # An accepted write is not republished; the register is the operator's.
+        self.assertNotIn('JTC.ModeSet', m.update(mode=MODE_MANUAL))
+        self.assertNotIn('JTC.ModeSet', m.update())
+
+    def test_an_unknown_mode_is_ignored(self):
+        m = self.model()
+        m.update(mode=MODE_MANUAL, p_set=500.0)
+        m.update(mode=7)
+        self.assertEqual(m.mode, MODE_MANUAL)
+        self.assertEqual(m.update()['JTC.Power'], 500.0)
+
+    def test_switching_back_returns_to_the_curve(self):
+        m = self.model()
+        m.update(mode=MODE_MANUAL, p_set=640.0)
+        self.assertAlmostEqual(m.update(mode=MODE_CURVE)['JTC.Power'], 400.0, places=1)
+
+    def test_the_typed_figure_survives_a_round_trip(self):
+        # The register keeps the last figure, so going to the curve and back
+        # returns to what was typed rather than to the opening default.
+        m = self.model()
+        m.update(mode=MODE_MANUAL, p_set=777.0)
+        m.update(mode=MODE_CURVE)
+        self.assertEqual(m.update(mode=MODE_MANUAL)['JTC.Power'], 777.0)
+
+    def test_a_curve_is_still_required(self):
+        # Manual is an override of the curve, not a replacement for it: there
+        # is always a file to switch back to.
+        with self.assertRaises(ValueError):
+            JTCLoadModel({'DeviceKey': 'JTC_TEST'}, 12.0)
+
+
+class Wiring(unittest.TestCase):
+    """The offsets main.py reads must be the offsets the map publishes.
+
+    Nothing else would notice if the two drifted apart -- the common load would
+    quietly keep running on whatever it started with, and the dashboard's source
+    buttons would write into a register no model reads.
+    """
+
+    def test_the_control_registers_are_where_the_map_says(self):
+        points = REGISTERS['JTCLoad']['points']
+        self.assertEqual(points['JTC.ModeSet'], 2)
+        self.assertEqual(points['JTC.PowerSet'], 4)
+        self.assertEqual(points['JTC.ModeSet'] % 2, 0)
+        self.assertEqual(points['JTC.PowerSet'] % 2, 0)
+
+    def test_main_passes_those_registers_to_the_model(self):
+        source = open(os.path.join(os.path.dirname(os.path.dirname(
+            os.path.abspath(__file__))), 'main.py')).read()
+        self.assertIn("elif dev_info['type'] == 'JTCLoad':", source)
+        self.assertIn("mode=dev_info['data'].get(2)", source)
+        self.assertIn("p_set=dev_info['data'].get(4)", source)
+
+    def test_both_interfaces_agree_on_what_is_writable(self):
+        self.assertEqual(web_server.WRITABLE['JTCLoad'],
+                         {'JTC.ModeSet': 2, 'JTC.PowerSet': 4})
+
+    def test_the_api_offers_two_sources_not_three(self):
+        self.assertEqual(web_server.MODE_VALUES['JTCLoad'], (0, 2))
 
 
 if __name__ == '__main__':

@@ -822,7 +822,14 @@
       title: "JTC Common Load", role: "is-con",
       primary: "JTC.Power",
       offLoop: true,          // outside the Tower 10 control loop
-      rows: []
+      rows: [],
+      // Two sources, not three: this load has no synthetic day, so the choice
+      // is the operator's curve or the operator's own figure.
+      source: {
+        point: "JTC.ModeSet", label: "Source", manual: 2,
+        options: [[0, "CSV curve"], [2, "Manual"]],
+        entry: { point: "JTC.PowerSet", label: "Manual power (kW)" }
+      }
     },
     T7PV: {
       title: "Tower 7 PV", role: "is-gen",
@@ -1067,8 +1074,12 @@
     },
     JTCLoad: {
       what: "The landlord's common-services load — site incoming minus every tenant feeder, " +
-            "Tower 10 included. Supplied as a curve; the simulator never invents it.",
-      formula: "JTC.Power = curve(sim_hour), linearly interpolated"
+            "Tower 10 included. It runs from one of two sources, switchable live on its card: " +
+            "the CSV curve the operator supplies, or a figure the operator types in. There is no " +
+            "third, synthetic source — this load is never a number the simulator invented, " +
+            "because a fabricated common load would put the virtual grid point at a wrong value " +
+            "without looking wrong.",
+      formula: "JTC.Power = curve(sim_hour) · JTC.PowerSet"
     },
     BESS: {
       what: "The 800 kW battery. It is the one device on both sides of the boundary: it is in " +
@@ -1661,9 +1672,15 @@
 
   function modeInput(dev, key, type) {
     var sel = document.createElement("select");
-    var opts = [["0", "CSV curve"], ["1", "Synthetic"]];
-    // Only the load can be driven by hand; the PV is a curve or a synthetic day.
-    if (type === "Load") opts.push(["2", "Manual (typed in on the Live tab)"]);
+    // The JTC common load has no synthetic day -- its curve is the operator's
+    // and so is its manual figure; nothing about it is ever invented.
+    var opts = type === "JTCLoad" ? [["0", "CSV curve"]]
+                                  : [["0", "CSV curve"], ["1", "Synthetic"]];
+    // Only the two loads can be driven by hand; the PV is a curve or a
+    // synthetic day, never a typed-in number.
+    if (type === "Load" || type === "JTCLoad") {
+      opts.push(["2", "Manual (typed in on the Live tab)"]);
+    }
     opts.forEach(function (o) {
       var opt = document.createElement("option");
       opt.value = o[0]; opt.textContent = o[1];

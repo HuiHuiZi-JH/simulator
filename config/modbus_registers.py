@@ -111,10 +111,14 @@ REGISTERS = {
     "JTCLoad": {
         "base_addr": 0,
         "points": {
-            "JTC.Power": 0
+            "JTC.Power": 0,
+            "JTC.ModeSet": 2,
+            "JTC.PowerSet": 4
         },
         "descriptions": {
-            "JTC.Power": "JTC common load power (landlord / common services)"
+            "JTC.Power": "JTC common load power (landlord / common services)",
+            "JTC.ModeSet": "Source: 0 = CSV curve, 2 = manual (writable). 1 is the building load's synthetic day and is refused here",
+            "JTC.PowerSet": "Manual common load power (kW), used when the source is 2 (writable)"
         }
     },
     "T7PV": {
